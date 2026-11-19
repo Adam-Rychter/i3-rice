@@ -12,6 +12,7 @@ set -euo pipefail
 #   ./install-i3-rice.sh                      # install packages and write configs
 #   ./install-i3-rice.sh --dry-run            # show what would happen, change nothing
 #   ./install-i3-rice.sh --no-packages        # write configs only
+#   ./install-i3-rice.sh --scale 125           # HiDPI scaling percent (default 125)
 #   ./install-i3-rice.sh --list-packages      # show resolved package names
 #   ./install-i3-rice.sh --package-manager dnf
 #   ./install-i3-rice.sh --user alice          # add alice to the sudo/wheel group
@@ -27,6 +28,7 @@ LIST_PACKAGES=0
 PM_OVERRIDE="${I3_RICE_PM:-}"
 TARGET_USER="${I3_RICE_USER:-}"
 SKIP_ADMIN_GROUP=0
+SCALE=125
 
 usage() {
   cat <<'EOF'
@@ -41,6 +43,7 @@ Usage:
   ./install-i3-rice.sh                      # install packages and write configs
   ./install-i3-rice.sh --dry-run            # show what would happen, change nothing
   ./install-i3-rice.sh --no-packages        # write configs only
+  ./install-i3-rice.sh --scale 125           # HiDPI scaling percent (default 125)
   ./install-i3-rice.sh --list-packages      # show resolved package names
   ./install-i3-rice.sh --package-manager dnf
   ./install-i3-rice.sh --user alice          # add alice to the sudo/wheel group
@@ -62,6 +65,11 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
     --no-packages) INSTALL_PACKAGES=0 ;;
+    --scale)
+      [ $# -ge 2 ] || die "--scale needs a value"
+      SCALE="$2"
+      shift
+      ;;
     --list-packages) LIST_PACKAGES=1 ;;
     --package-manager)
       [ $# -ge 2 ] || die "--package-manager needs a value"
@@ -82,6 +90,43 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+case "$SCALE" in
+  ''|*[!0-9]*) die "--scale must be a whole number such as 125" ;;
+esac
+if [ "$SCALE" -lt 100 ] || [ "$SCALE" -gt 300 ]; then
+  die "--scale must be between 100 and 300"
+fi
+
+# Derived HiDPI values. Fonts use points and follow Xft.dpi; fixed pixel sizes
+# are rounded to the nearest pixel.
+DPI=$((96 * SCALE / 100))
+SCALE_FACTOR=$(printf '%d.%02d' "$((SCALE / 100))" "$((SCALE % 100))")
+spx() { echo $(( ($1 * SCALE + 50) / 100 )); }
+
+CURSOR_SIZE=$(spx 24)
+I3_GAP=$(spx 8)
+I3_BORDER=$(spx 2)
+BAR_HEIGHT=$(spx 28)
+BAR_PADDING=$(spx 1)
+BAR_MARGIN=$(spx 1)
+ROFI_PAD=$(spx 12)
+ROFI_BORDER=$(spx 2)
+ROFI_RADIUS=$(spx 8)
+ROFI_SMALL_RADIUS=$(spx 6)
+ROFI_INPUT_PAD="$(spx 8)px $(spx 12)px"
+ROFI_ELEMENT_PAD="$ROFI_INPUT_PAD"
+DUNST_WIDTH=$(spx 320)
+DUNST_HEIGHT=$(spx 120)
+DUNST_OFFSET="$(spx 12)x$(spx 12)"
+DUNST_FRAME=$(spx 2)
+DUNST_RADIUS=$(spx 8)
+DUNST_PADDING=$(spx 12)
+DUNST_HPADDING=$(spx 14)
+DUNST_ICON=$(spx 48)
+PICOM_SHADOW_RADIUS=$(spx 12)
+PICOM_SHADOW_OFFSET="-$(spx 12)"
+PICOM_RADIUS=$(spx 8)
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -280,6 +325,7 @@ fi
 
 log "distro: $DISTRO"
 [ "$PM" = "none" ] || log "package manager: $PM_LABEL"
+log "scale: ${SCALE}% (Xft.dpi $DPI, cursor $CURSOR_SIZE px)"
 
 SUDO=()
 if [ "$INSTALL_PACKAGES" = 1 ] && [ "$(id -u)" -ne 0 ]; then
@@ -301,6 +347,81 @@ write_config() {
   fi
   cat > "$target"
   log "wrote $target"
+}
+
+update_managed_block() {
+  local file="$1" content="$2"
+  local begin="# >>> i3-rice scaling >>>"
+  local end="# <<< i3-rice scaling <<<"
+  local tmp
+
+  if [ "$DRY_RUN" = 1 ]; then
+    log "[dry-run] would update the scaling block in $file"
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$file")"
+  touch "$file"
+  if [ -s "$file" ]; then
+    cp -a "$file" "$file.bak-$STAMP"
+  fi
+
+  tmp="$(mktemp)"
+  awk -v b="$begin" -v e="$end" '
+    $0 == b { skip = 1; next }
+    $0 == e { skip = 0; next }
+    !skip { print }
+  ' "$file" > "$tmp"
+
+  {
+    cat "$tmp"
+    printf '%s\n%s\n%s\n' "$begin" "$content" "$end"
+  } > "$file"
+
+  rm -f "$tmp"
+  log "updated the scaling block in $file"
+}
+
+apply_scaling() {
+  [ "$DRY_RUN" = 1 ] && return 0
+
+  local file
+  for file in \
+    "$HOME/.config/i3/config" \
+    "$HOME/.config/polybar/config.ini" \
+    "$HOME/.config/rofi/config.rasi" \
+    "$HOME/.config/rofi/catppuccin-mocha.rasi" \
+    "$HOME/.config/picom/picom.conf" \
+    "$HOME/.config/dunst/dunstrc"; do
+    [ -f "$file" ] || continue
+    sed -i \
+      -e "s|@SCALE_DPI@|$DPI|g" \
+      -e "s|@I3_GAP@|$I3_GAP|g" \
+      -e "s|@I3_BORDER@|$I3_BORDER|g" \
+      -e "s|@BAR_HEIGHT@|$BAR_HEIGHT|g" \
+      -e "s|@BAR_PADDING@|$BAR_PADDING|g" \
+      -e "s|@BAR_MARGIN@|$BAR_MARGIN|g" \
+      -e "s|@ROFI_BORDER@|$ROFI_BORDER|g" \
+      -e "s|@ROFI_RADIUS@|$ROFI_RADIUS|g" \
+      -e "s|@ROFI_SMALL_RADIUS@|$ROFI_SMALL_RADIUS|g" \
+      -e "s|@ROFI_PAD@|$ROFI_PAD|g" \
+      -e "s|@ROFI_INPUT_PAD@|$ROFI_INPUT_PAD|g" \
+      -e "s|@ROFI_ELEMENT_PAD@|$ROFI_ELEMENT_PAD|g" \
+      -e "s|@DUNST_WIDTH@|$DUNST_WIDTH|g" \
+      -e "s|@DUNST_HEIGHT@|$DUNST_HEIGHT|g" \
+      -e "s|@DUNST_OFFSET@|$DUNST_OFFSET|g" \
+      -e "s|@DUNST_FRAME@|$DUNST_FRAME|g" \
+      -e "s|@DUNST_RADIUS@|$DUNST_RADIUS|g" \
+      -e "s|@DUNST_PADDING@|$DUNST_PADDING|g" \
+      -e "s|@DUNST_HPADDING@|$DUNST_HPADDING|g" \
+      -e "s|@DUNST_ICON@|$DUNST_ICON|g" \
+      -e "s|@PICOM_SHADOW_RADIUS@|$PICOM_SHADOW_RADIUS|g" \
+      -e "s|@PICOM_SHADOW_OFFSET@|$PICOM_SHADOW_OFFSET|g" \
+      -e "s|@PICOM_RADIUS@|$PICOM_RADIUS|g" \
+      "$file"
+  done
+
+  log "applied ${SCALE}% scaling to the configs"
 }
 
 install_packages() {
@@ -451,7 +572,7 @@ write_config "$HOME/.config/i3/config" <<'I3CONF'
 
 set $mod Mod4
 set $term kitty
-set $menu --no-startup-id rofi -show drun
+set $menu --no-startup-id rofi -dpi @SCALE_DPI@ -show drun
 
 set $ws1 "1:term"
 set $ws2 "2:code"
@@ -468,12 +589,12 @@ set $red    #f38ba8
 font pango:JetBrains Mono 10
 
 # Look and feel
-default_border pixel 2
-default_floating_border pixel 2
+default_border pixel @I3_BORDER@
+default_floating_border pixel @I3_BORDER@
 hide_edge_borders smart
 smart_borders on
-gaps inner 8
-gaps outer 8
+gaps inner @I3_GAP@
+gaps outer @I3_GAP@
 smart_gaps on
 
 client.focused          $blue $base $text $blue $blue
@@ -510,7 +631,7 @@ bindsym $mod+Shift+5 move container to workspace $ws5
 # Launch and manage windows
 bindsym $mod+Return exec --no-startup-id $term
 bindsym $mod+d exec $menu
-bindsym $mod+Tab exec --no-startup-id rofi -show window
+bindsym $mod+Tab exec --no-startup-id rofi -dpi @SCALE_DPI@ -show window
 bindsym $mod+q kill
 
 # Focus (vimmer style, arrows also work)
@@ -578,6 +699,9 @@ bar {
 }
 
 # Autostart
+# HiDPI: the session also merges this from ~/.xprofile before i3 starts.
+exec --no-startup-id sh -c 'xrandr --dpi @SCALE_DPI@ 2>/dev/null || true'
+exec --no-startup-id sh -c 'xrdb -merge ~/.config/i3/Xresources 2>/dev/null || true'
 exec_always --no-startup-id ~/.config/polybar/launch.sh
 exec --no-startup-id picom --config ~/.config/picom/picom.conf
 exec --no-startup-id dunst
@@ -604,17 +728,18 @@ alert = #f38ba8
 [bar/main]
 monitor = ${env:MONITOR:}
 width = 100%
-height = 28
+height = @BAR_HEIGHT@
+dpi = @SCALE_DPI@
 radius = 0
 fixed-center = true
 background = ${colors.background}
 foreground = ${colors.foreground}
 line-size = 2
 line-color = ${colors.primary}
-padding-left = 1
-padding-right = 1
-module-margin-left = 1
-module-margin-right = 1
+padding-left = @BAR_PADDING@
+padding-right = @BAR_PADDING@
+module-margin-left = @BAR_MARGIN@
+module-margin-right = @BAR_MARGIN@
 font-0 = JetBrains Mono:size=10;2
 modules-left = i3
 modules-center = date
@@ -740,10 +865,10 @@ write_config "$HOME/.config/rofi/catppuccin-mocha.rasi" <<'ROFITHEME'
 window {
     width: 40%;
     background-color: @bg;
-    border: 2px;
+    border: @ROFI_BORDER@px;
     border-color: @accent;
-    border-radius: 8px;
-    padding: 12px;
+    border-radius: @ROFI_RADIUS@px;
+    padding: @ROFI_PAD@px;
 }
 
 mainbox {
@@ -753,8 +878,8 @@ mainbox {
 
 inputbar {
     background-color: @bg-alt;
-    border-radius: 6px;
-    padding: 8px 12px;
+    border-radius: @ROFI_SMALL_RADIUS@px;
+    padding: @ROFI_INPUT_PAD@;
     children: [prompt, entry];
 }
 
@@ -777,8 +902,8 @@ listview {
 }
 
 element {
-    padding: 8px 12px;
-    border-radius: 6px;
+    padding: @ROFI_ELEMENT_PAD@;
+    border-radius: @ROFI_SMALL_RADIUS@px;
     background-color: transparent;
     text-color: @fg;
 }
@@ -804,17 +929,17 @@ backend = "glx";
 vsync = true;
 
 shadow = true;
-shadow-radius = 12;
+shadow-radius = @PICOM_SHADOW_RADIUS@;
 shadow-opacity = 0.45;
-shadow-offset-x = -12;
-shadow-offset-y = -12;
+shadow-offset-x = @PICOM_SHADOW_OFFSET@;
+shadow-offset-y = @PICOM_SHADOW_OFFSET@;
 shadow-exclude = [
   "window_type = 'dock'",
   "window_type = 'desktop'",
   "class_g = 'Polybar'",
 ];
 
-corner-radius = 8;
+corner-radius = @PICOM_RADIUS@;
 rounded-corners-exclude = [
   "window_type = 'dock'",
   "window_type = 'desktop'",
@@ -842,23 +967,23 @@ write_config "$HOME/.config/dunst/dunstrc" <<'DUNSTCONF'
 [global]
     monitor = 0
     follow = mouse
-    width = 320
-    height = 120
+    width = @DUNST_WIDTH@
+    height = @DUNST_HEIGHT@
     origin = top-right
-    offset = 12x12
-    frame_width = 2
+    offset = @DUNST_OFFSET@
+    frame_width = @DUNST_FRAME@
     frame_color = "#89b4fa"
     separator_color = frame
     font = JetBrains Mono 10
-    corner_radius = 8
+    corner_radius = @DUNST_RADIUS@
     background = "#1e1e2e"
     foreground = "#cdd6f4"
     timeout = 8
     transparency = 0
-    padding = 12
-    horizontal_padding = 14
+    padding = @DUNST_PADDING@
+    horizontal_padding = @DUNST_HPADDING@
     icon_position = left
-    max_icon_size = 48
+    max_icon_size = @DUNST_ICON@
     markup = full
 
 [urgency_low]
@@ -879,6 +1004,34 @@ write_config "$HOME/.config/dunst/dunstrc" <<'DUNSTCONF'
     frame_color = "#f38ba8"
     timeout = 0
 DUNSTCONF
+
+log "writing HiDPI resources"
+write_config "$HOME/.config/i3/Xresources" <<XRES
+Xft.dpi: $DPI
+Xcursor.size: $CURSOR_SIZE
+XRES
+
+log "writing session scaling environment"
+write_config "$HOME/.config/i3/scale.env" <<ENV
+# Generated by install-i3-rice.sh for ${SCALE}% scaling.
+# Xft.dpi already scales fonts for Xft/Pango apps; do not also scale GDK text.
+export GDK_SCALE=1
+export GDK_DPI_SCALE=1.0
+export QT_AUTO_SCREEN_SCALE_FACTOR=0
+export QT_FONT_DPI=96
+export QT_SCALE_FACTOR=$SCALE_FACTOR
+export XCURSOR_SIZE=$CURSOR_SIZE
+ENV
+
+SCALE_BLOCK='[ -f "$HOME/.config/i3/scale.env" ] && . "$HOME/.config/i3/scale.env"
+[ -f "$HOME/.config/i3/Xresources" ] && xrdb -merge "$HOME/.config/i3/Xresources"'
+log "wiring scaling into the X session"
+update_managed_block "$HOME/.xprofile" "$SCALE_BLOCK"
+if [ -f "$HOME/.xsessionrc" ]; then
+  update_managed_block "$HOME/.xsessionrc" "$SCALE_BLOCK"
+fi
+
+apply_scaling
 
 if [ "$DRY_RUN" = 0 ]; then
   chmod +x "$HOME/.config/polybar/launch.sh"
@@ -905,6 +1058,9 @@ if [ "$DRY_RUN" = 0 ]; then
 fi
 
 log "done"
+printf '\nScaling: %s%% (Xft.dpi %s, cursor %s px).\n' "$SCALE" "$DPI" "$CURSOR_SIZE"
+printf 'If i3 titlebars look small on first login, restart i3 with $mod+Shift+r.\n'
+printf 'Use --scale 100 for standard-density displays.\n'
 cat <<'NEXT'
 
 Next steps:

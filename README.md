@@ -207,6 +207,7 @@ Useful flags:
 |---|---|
 | `--dry-run` | print every action, install and write nothing |
 | `--no-packages` | write configs only, skip package installation |
+| `--scale <percent>` | HiDPI scaling percent (default **125**) |
 | `--list-packages` | print the package groups resolved for the detected manager |
 | `--package-manager <pm>` | force `apt`, `dnf`, `pacman`, `zypper`, or `apk` (`I3_RICE_PM` also works) |
 | `--user <name>` | user to add to the admin group (default: `$SUDO_USER`, login name, or `$USER`) |
@@ -221,9 +222,11 @@ What it changes:
    `--no-admin-group` is passed.
 3. Backs up any existing config as `<file>.bak-<timestamp>`.
 4. Writes i3, Polybar, Rofi, Picom, and Dunst configs under `~/.config/`.
-5. Makes `~/.config/polybar/launch.sh` executable.
-6. Warns if `~/Pictures/wallpaper.jpg` is missing.
-7. Reports any commands or fonts that are still missing at the end.
+5. Writes HiDPI resources (`~/.config/i3/Xresources`, `~/.config/i3/scale.env`) and wires them into
+   `~/.xprofile` and `~/.xsessionrc` via a managed block.
+6. Makes `~/.config/polybar/launch.sh` executable.
+7. Warns if `~/Pictures/wallpaper.jpg` is missing.
+8. Reports any commands or fonts that are still missing at the end.
 
 It does **not** change your login session, GTK theme, or display configuration.
 
@@ -246,6 +249,41 @@ It does **not** change your login session, GTK theme, or display configuration.
 8. **In a VM or with software rendering**, if picom flickers or stutters, set
    `backend = "xrender"` and `vsync = false` in `~/.config/picom/picom.conf`.
 9. Reload i3 with `Super+Shift+c` after each config edit.
+
+---
+
+## Scaling / HiDPI
+
+The installer defaults to **125%**, intended for 4K displays. Change it with:
+
+```sh
+./install-i3-rice.sh --scale 125      # default
+./install-i3-rice.sh --scale 100      # standard-density displays
+./install-i3-rice.sh --scale 150      # larger
+```
+
+Scaling is applied at three levels:
+
+| What | How |
+|---|---|
+| Xft/Pango fonts (i3, Rofi, Dunst, GTK) | `Xft.dpi` in `~/.config/i3/Xresources` |
+| Rice geometry | i3 gaps/borders, Polybar height/DPI, Rofi padding/border, Dunst size/padding, Picom shadows/corners |
+| Toolkits | `~/.config/i3/scale.env` (GDK, Qt, cursor size) |
+
+`scale.env` and `Xresources` are loaded from a managed block in `~/.xprofile` and `~/.xsessionrc`; i3 also merges
+them at startup. Log out and back in, or restart i3 with `$mod+Shift+r`, after changing the scale.
+
+### Per-application notes
+
+X11 does not have a single global fractional-scale switch, so a few apps need their own setting:
+
+- **GTK3:** text follows `Xft.dpi`, but widgets stay at 1× (GTK3 has no fractional widget scaling). For integer
+  200% widgets, set `GDK_SCALE=2` in `scale.env`. Otherwise use the app's own zoom.
+- **Firefox:** `about:config` → `layout.css.devPixelsPerPx` = `1.25` (or `-1` to follow the system DPI).
+- **VS Code:** set `window.zoomLevel` to about `1`, or launch with `--force-device-scale-factor=1.25`.
+- **Steam:** add `-forcedesktopscaling 1.25` to the Steam launch options.
+- **kitty:** set `font_size` in `kitty.conf` (fractional values such as `12.5` are accepted).
+- **NVIDIA:** if scaling makes text blurry, check that the monitor is running at its native 4K resolution.
 
 ---
 
