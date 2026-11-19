@@ -207,7 +207,7 @@ Useful flags:
 |---|---|
 | `--dry-run` | print every action, install and write nothing |
 | `--no-packages` | write configs only, skip package installation |
-| `--scale <percent>` | HiDPI scaling percent (default **125**) |
+| `--scale <percent>` | HiDPI scaling percent (default **200**) |
 | `--list-packages` | print the package groups resolved for the detected manager |
 | `--package-manager <pm>` | force `apt`, `dnf`, `pacman`, `zypper`, or `apk` (`I3_RICE_PM` also works) |
 | `--user <name>` | user to add to the admin group (default: `$SUDO_USER`, login name, or `$USER`) |
@@ -254,12 +254,12 @@ It does **not** change your login session, GTK theme, or display configuration.
 
 ## Scaling / HiDPI
 
-The installer defaults to **125%**, intended for 4K displays. Change it with:
+The installer defaults to **200%**, intended for 4K displays. Change it with:
 
 ```sh
-./install-i3-rice.sh --scale 125      # default
+./install-i3-rice.sh --scale 200      # default, 2x widgets and text
+./install-i3-rice.sh --scale 125      # 1.25x text, 1x GTK widgets
 ./install-i3-rice.sh --scale 100      # standard-density displays
-./install-i3-rice.sh --scale 150      # larger
 ```
 
 Scaling is applied at three levels:
@@ -271,19 +271,30 @@ Scaling is applied at three levels:
 | Toolkits | `~/.config/i3/scale.env` (GDK, Qt, cursor size) |
 
 `scale.env` and `Xresources` are loaded from a managed block in `~/.xprofile` and `~/.xsessionrc`; i3 also merges
-them at startup. Log out and back in, or restart i3 with `$mod+Shift+r`, after changing the scale.
+them at startup. **Log out of the X session and back in** after changing the scale. Restarting i3 alone re-reads
+the i3 config, but GTK/Qt applications only get the new environment variables from a fresh login.
+
+After logging back in, verify:
+
+```sh
+echo "$GDK_SCALE $GDK_DPI_SCALE $QT_SCALE_FACTOR"   # 200%: 2 0.50 2.00
+xrdb -query | grep -i xft.dpi                        # Xft.dpi: 192
+```
+
+If `GDK_SCALE` is empty, the display manager is not sourcing `~/.xprofile`/`~/.xsessionrc`; check the
+[Troubleshooting](#troubleshooting) table.
 
 ### Per-application notes
 
 X11 does not have a single global fractional-scale switch, so a few apps need their own setting:
 
-- **GTK3:** text follows `Xft.dpi`, but widgets stay at 1× (GTK3 has no fractional widget scaling). For integer
-  200% widgets, set `GDK_SCALE=2` in `scale.env`. Otherwise use the app's own zoom.
-- **Firefox:** `about:config` → `layout.css.devPixelsPerPx` = `1.25` (or `-1` to follow the system DPI).
-- **VS Code:** set `window.zoomLevel` to about `1`, or launch with `--force-device-scale-factor=1.25`.
-- **Steam:** add `-forcedesktopscaling 1.25` to the Steam launch options.
-- **kitty:** set `font_size` in `kitty.conf` (fractional values such as `12.5` are accepted).
-- **NVIDIA:** if scaling makes text blurry, check that the monitor is running at its native 4K resolution.
+- **GTK3:** widgets scale by the integer part of the percentage. 200% → 2× widgets, 125% → 1× widgets with
+  1.25× text. `GDK_SCALE` and `GDK_DPI_SCALE` are set automatically in `scale.env`.
+- **Firefox:** `about:config` → `layout.css.devPixelsPerPx` = `2.0` for 200% (or `-1` to follow the system DPI).
+- **VS Code:** launch with `--force-device-scale-factor=2`, or set `window.zoomLevel` to about `2`.
+- **Steam:** add `-forcedesktopscaling 2` to the Steam launch options.
+- **kitty:** set `font_size` in `kitty.conf`; it also follows the Xft DPI.
+- **NVIDIA:** make sure the monitor is running at its native 4K resolution so 2× is pixel-perfect.
 
 ---
 
@@ -321,6 +332,7 @@ This costs GPU time and is off by default.
 | Rofi shows no icons | install an icon theme or remove `show-icons` from `config.rasi` |
 | Lock screen does not appear | check `xss-lock` is running: `pgrep -a xss-lock` |
 | `usermod: command not found` | it is in `passwd` (Debian) / `shadow-utils` (Fedora) / `shadow` (others); use `/usr/sbin/usermod` or add `/usr/sbin` to `PATH` |
+| Scaling env vars empty after login | the DM skipped `~/.xprofile`/`~/.xsessionrc`; source `~/.config/i3/scale.env` from your session startup, or start i3 via a wrapper that sources it |
 
 ---
 
