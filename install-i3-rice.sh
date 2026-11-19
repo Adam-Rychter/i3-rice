@@ -117,7 +117,8 @@ esac
 spx() { echo $(( ($1 * SCALE + 50) / 100 )); }
 
 CURSOR_SIZE=$(spx 24)
-I3_GAP=$(spx 8)
+I3_GAP_INNER=$(spx 3)
+I3_GAP_OUTER=$(spx 4)
 I3_BORDER=$(spx 2)
 BAR_HEIGHT=$(spx 28)
 BAR_PADDING=$(spx 1)
@@ -423,7 +424,8 @@ apply_scaling() {
     sed -i \
       -e "s|@SCALE_DPI@|$DPI|g" \
       -e "s|@ST_TERM@|$ST_TERM|g" \
-      -e "s|@I3_GAP@|$I3_GAP|g" \
+      -e "s|@I3_GAP_INNER@|$I3_GAP_INNER|g" \
+      -e "s|@I3_GAP_OUTER@|$I3_GAP_OUTER|g" \
       -e "s|@I3_BORDER@|$I3_BORDER|g" \
       -e "s|@BAR_HEIGHT@|$BAR_HEIGHT|g" \
       -e "s|@BAR_PADDING@|$BAR_PADDING|g" \
@@ -746,8 +748,8 @@ default_border pixel @I3_BORDER@
 default_floating_border pixel @I3_BORDER@
 hide_edge_borders smart
 smart_borders on
-gaps inner @I3_GAP@
-gaps outer @I3_GAP@
+gaps inner @I3_GAP_INNER@
+gaps outer @I3_GAP_OUTER@
 smart_gaps on
 
 client.focused          $blue $base $text $blue $blue
