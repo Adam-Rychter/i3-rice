@@ -141,7 +141,15 @@ PICOM_SHADOW_OFFSET="-$(spx 12)"
 PICOM_RADIUS=$(spx 8)
 ST_FONT_PX=$(spx 14)
 
+ST_VERSION="0.9.3"
+ST_BIN="$HOME/.local/bin/st"
+ST_BUILD_DIR="$HOME/.cache/i3-rice/st-$ST_VERSION"
+
 STAMP="$(date +%Y%m%d-%H%M%S)"
+
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+  warn "do not run this via sudo; run ./install-i3-rice.sh as $SUDO_USER (it elevates only for packages)"
+fi
 
 # --- distro / package manager detection -------------------------------------
 
@@ -190,7 +198,7 @@ case "$PM" in
     REFRESH=(apt-get update)
     INSTALL=(apt-get install -y --no-install-recommends)
     PKG_GROUPS[wm]="i3 i3lock xss-lock"
-    PKG_GROUPS[terminal]="stterm"
+    PKG_GROUPS[terminal]="stterm build-essential libx11-dev libxft-dev libfontconfig1-dev libfreetype-dev pkg-config ncurses-bin curl"
     PKG_GROUPS[bar]="polybar"
     PKG_GROUPS[launcher]="rofi"
     PKG_GROUPS[compositor]="picom"
@@ -216,7 +224,7 @@ case "$PM" in
     REFRESH=()
     INSTALL=(dnf install -y)
     PKG_GROUPS[wm]="i3 i3lock xss-lock"
-    PKG_GROUPS[terminal]="st"
+    PKG_GROUPS[terminal]="st gcc make libX11-devel libXft-devel fontconfig-devel freetype-devel pkgconf-pkg-config ncurses curl"
     PKG_GROUPS[bar]="polybar"
     PKG_GROUPS[launcher]="rofi"
     PKG_GROUPS[compositor]="picom"
@@ -242,7 +250,7 @@ case "$PM" in
     REFRESH=()
     INSTALL=(pacman -S --needed --noconfirm)
     PKG_GROUPS[wm]="i3-wm i3lock xss-lock"
-    PKG_GROUPS[terminal]="st"
+    PKG_GROUPS[terminal]="st gcc make pkgconf libx11 libxft fontconfig freetype2 ncurses curl"
     PKG_GROUPS[bar]="polybar"
     PKG_GROUPS[launcher]="rofi"
     PKG_GROUPS[compositor]="picom"
@@ -268,7 +276,7 @@ case "$PM" in
     REFRESH=(zypper --non-interactive refresh)
     INSTALL=(zypper --non-interactive install --no-recommends)
     PKG_GROUPS[wm]="i3 i3lock xss-lock"
-    PKG_GROUPS[terminal]="st"
+    PKG_GROUPS[terminal]="st gcc make pkg-config libX11-devel libXft-devel fontconfig-devel freetype2-devel ncurses-utils curl"
     PKG_GROUPS[bar]="polybar"
     PKG_GROUPS[launcher]="rofi"
     PKG_GROUPS[compositor]="picom"
@@ -294,7 +302,7 @@ case "$PM" in
     REFRESH=(apk update)
     INSTALL=(apk add --no-cache)
     PKG_GROUPS[wm]="i3wm i3lock xss-lock"
-    PKG_GROUPS[terminal]="st"
+    PKG_GROUPS[terminal]="st build-base libx11-dev libxft-dev fontconfig-dev freetype-dev pkgconf ncurses curl"
     PKG_GROUPS[bar]="polybar"
     PKG_GROUPS[launcher]="rofi"
     PKG_GROUPS[compositor]="picom"
@@ -414,6 +422,7 @@ apply_scaling() {
     [ -f "$file" ] || continue
     sed -i \
       -e "s|@SCALE_DPI@|$DPI|g" \
+      -e "s|@ST_TERM@|$ST_TERM|g" \
       -e "s|@I3_GAP@|$I3_GAP|g" \
       -e "s|@I3_BORDER@|$I3_BORDER|g" \
       -e "s|@BAR_HEIGHT@|$BAR_HEIGHT|g" \
@@ -576,11 +585,137 @@ ensure_admin_group() {
   warn "then run: usermod -aG $ADMIN_GROUP $user"
 }
 
+install_st() {
+  log "building st $ST_VERSION with Catppuccin Mocha and ${SCALE}% font"
+
+  if [ "$DRY_RUN" = 1 ]; then
+    log "[dry-run] would build st $ST_VERSION to $ST_BIN (pixelsize=$ST_FONT_PX)"
+    return 0
+  fi
+
+  local missing=() tool
+  for tool in cc make pkg-config; do
+    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  done
+  if [ ${#missing[@]} -gt 0 ]; then
+    warn "skipping st build; missing tools: ${missing[*]}"
+    warn "install the 'terminal' package group (build dependencies), then rerun"
+    return 0
+  fi
+
+  local downloader=""
+  if command -v curl >/dev/null 2>&1; then
+    downloader="curl"
+  elif command -v wget >/dev/null 2>&1; then
+    downloader="wget"
+  else
+    warn "skipping st build; install curl or wget"
+    return 0
+  fi
+
+  mkdir -p "$HOME/.cache/i3-rice" "$HOME/.local/bin"
+
+  local tarball="$HOME/.cache/i3-rice/st-$ST_VERSION.tar.gz"
+  local url="https://dl.suckless.org/st/st-$ST_VERSION.tar.gz"
+
+  if [ ! -s "$tarball" ]; then
+    log "downloading $url"
+    if [ "$downloader" = "curl" ]; then
+      curl -fsSL "$url" -o "$tarball" || { warn "could not download st source"; return 0; }
+    else
+      wget -qO "$tarball" "$url" || { warn "could not download st source"; return 0; }
+    fi
+  fi
+
+  rm -rf "$ST_BUILD_DIR"
+  mkdir -p "$ST_BUILD_DIR"
+  if ! tar -xzf "$tarball" -C "$ST_BUILD_DIR" --strip-components=1; then
+    warn "could not extract st source"
+    return 0
+  fi
+
+  # Start from upstream defaults, replace the palette, then patch appearance.
+  awk '
+    /^static const char \*colorname\[\] = \{/ {
+      print "static const char *colorname[] = {"
+      print "\t/* Catppuccin Mocha */"
+      print "\t\"#45475a\", \"#f38ba8\", \"#a6e3a1\", \"#f9e2af\","
+      print "\t\"#89b4fa\", \"#f5c2e7\", \"#94e2d5\", \"#bac2de\","
+      print "\t\"#585b70\", \"#f38ba8\", \"#a6e3a1\", \"#f9e2af\","
+      print "\t\"#89b4fa\", \"#f5c2e7\", \"#94e2d5\", \"#a6adc8\","
+      print ""
+      print "\t[255] = 0,"
+      print ""
+      print "\t\"#f5e0dc\", /* cursor */"
+      print "\t\"#1e1e2e\", /* reverse cursor */"
+      print "\t\"#cdd6f4\", /* default foreground */"
+      print "\t\"#1e1e2e\", /* default background */"
+      print "};"
+      skip = 1
+      next
+    }
+    skip && /^};/ { skip = 0; next }
+    !skip { print }
+  ' "$ST_BUILD_DIR/config.def.h" > "$ST_BUILD_DIR/config.h"
+
+  sed -i \
+    -e "s|^static char \*font = .*|static char *font = \"JetBrains Mono:pixelsize=$ST_FONT_PX:antialias=true:autohint=true\";|" \
+    -e "s|^static int borderpx = .*|static int borderpx = $I3_BORDER;|" \
+    -e "s|^unsigned int defaultfg = .*|unsigned int defaultfg = 258;|" \
+    -e "s|^unsigned int defaultbg = .*|unsigned int defaultbg = 259;|" \
+    -e "s|^unsigned int defaultcs = .*|unsigned int defaultcs = 256;|" \
+    -e "s|^static unsigned int defaultrcs = .*|static unsigned int defaultrcs = 257;|" \
+    "$ST_BUILD_DIR/config.h"
+
+  local build_log="$HOME/.cache/i3-rice/st-build.log"
+  if ! ( cd "$ST_BUILD_DIR" || exit 1; { make clean >/dev/null 2>&1 || true; }; make ) >"$build_log" 2>&1; then
+    warn "st build failed; see $build_log"
+    return 0
+  fi
+
+  install -m 0755 "$ST_BUILD_DIR/st" "$ST_BIN"
+  mkdir -p "$HOME/.local/share/man/man1" "$HOME/.terminfo"
+  sed "s/VERSION/$ST_VERSION/g" "$ST_BUILD_DIR/st.1" > "$HOME/.local/share/man/man1/st.1"
+  if command -v tic >/dev/null 2>&1; then
+    tic -x -o "$HOME/.terminfo" "$ST_BUILD_DIR/st.info" >/dev/null 2>&1 \
+      || warn "could not install the st-256color terminfo entry"
+  else
+    warn "tic not found; install ncurses-bin/terminfo for st-256color"
+  fi
+
+  mkdir -p "$HOME/.local/share/applications"
+  cat > "$HOME/.local/share/applications/st.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=st
+GenericName=Terminal
+Comment=Simple terminal (Catppuccin Mocha)
+Exec=$ST_BIN
+Icon=terminal
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=shell;prompt;command;commandline;
+DESKTOP
+
+  log "installed $ST_BIN"
+}
+
 if [ "$INSTALL_PACKAGES" = 1 ]; then
   install_packages
   ensure_admin_group
 else
   log "skipping package installation (--no-packages)"
+fi
+
+install_st
+if [ "$DRY_RUN" = 1 ]; then
+  ST_TERM="$ST_BIN"
+elif [ -x "$ST_BIN" ]; then
+  ST_TERM="$ST_BIN"
+else
+  ST_TERM="st"
+  warn "st was not built; i3 and Rofi will use 'st' from PATH"
+  warn "install the build dependencies and rerun without --no-packages"
 fi
 
 log "writing i3 config"
@@ -589,7 +724,7 @@ write_config "$HOME/.config/i3/config" <<'I3CONF'
 # Generated by install-i3-rice.sh. Reload with $mod+Shift+c, restart with $mod+Shift+r.
 
 set $mod Mod4
-set $term st
+set $term @ST_TERM@
 set $menu --no-startup-id rofi -dpi @SCALE_DPI@ -show drun
 
 set $ws1 "1:term"
@@ -852,7 +987,7 @@ write_config "$HOME/.config/rofi/config.rasi" <<'ROFICONF'
 configuration {
     modi: "drun,run,window";
     show-icons: true;
-    terminal: "st";
+    terminal: "@ST_TERM@";
     drun-display-format: "{name}";
     display-drun: "Apps";
     display-run: "Run";
@@ -1027,29 +1162,6 @@ log "writing HiDPI resources"
 write_config "$HOME/.config/i3/Xresources" <<XRES
 Xft.dpi: $DPI
 Xcursor.size: $CURSOR_SIZE
-
-! st (simple terminal) — Catppuccin Mocha + scaled font
-st.termname: st-256color
-st.font: JetBrains Mono:pixelsize=$ST_FONT_PX:antialias=true:autohint=true
-st.background: #1e1e2e
-st.foreground: #cdd6f4
-st.cursorColor: #f5e0dc
-st.color0: #45475a
-st.color1: #f38ba8
-st.color2: #a6e3a1
-st.color3: #f9e2af
-st.color4: #89b4fa
-st.color5: #f5c2e7
-st.color6: #94e2d5
-st.color7: #bac2de
-st.color8: #585b70
-st.color9: #f38ba8
-st.color10: #a6e3a1
-st.color11: #f9e2af
-st.color12: #89b4fa
-st.color13: #f5c2e7
-st.color14: #94e2d5
-st.color15: #a6adc8
 XRES
 
 log "writing session scaling environment"
@@ -1082,9 +1194,12 @@ fi
 
 if [ "$DRY_RUN" = 0 ]; then
   missing=()
-  for cmd in i3 polybar rofi picom dunst feh i3lock xss-lock maim xclip pactl nm-applet st; do
+  for cmd in i3 polybar rofi picom dunst feh i3lock xss-lock maim xclip pactl nm-applet; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
+  if [ ! -x "$ST_BIN" ] && ! command -v st >/dev/null 2>&1; then
+    missing+=("st")
+  fi
   if [ ${#missing[@]} -gt 0 ]; then
     warn "missing commands: ${missing[*]}"
     warn "install them with your package manager, or edit the configs that use them"

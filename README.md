@@ -94,7 +94,7 @@ Revisit Sway when Mint or Ubuntu packages Sway 1.10 or newer.
 | Displays | xrandr / arandr | `x11-xserver-utils`, `arandr` | i3 config (commented) |
 | Keyboard layout | setxkbmap | `x11-xkb-utils` | i3 config (commented) |
 | GTK theming | LXAppearance | `lxappearance` | GUI |
-| Terminal | st (simple terminal) | `stterm` (Debian) / `st` (others) | `~/.config/i3/Xresources` |
+| Terminal | st 0.9.3 (built from source) | build deps + `stterm` fallback | compiled `config.h` |
 | Media keys | playerctl | `playerctl` | i3 config |
 | Audio | PulseAudio tools + pavucontrol | `pavucontrol`, `pulseaudio-utils` | i3 config / GUI |
 | Network applet | nm-applet | `network-manager-gnome` | started from the i3 config |
@@ -114,8 +114,25 @@ supported family (see [Distro support](#distro-support)).
 - **Dunst** handles desktop notifications with Catppuccin-colored urgency levels.
 - **xss-lock** ties the lock screen to suspend and idle; `$mod+Escape` locks manually.
 - **maim** takes region screenshots; `Print` copies to the clipboard, `$mod+Print` saves to `~/Pictures`.
-- **st** is the terminal: CPU-rendered and very light (~13 MB), configured entirely through Xresources with
-  Catppuccin colors and a font size that follows `--scale`.
+- **st** is the terminal: CPU-rendered and very light (~13 MB), built from source with Catppuccin Mocha colors
+  and a font size derived from `--scale`. It installs to `~/.local/bin/st` with a matching `.desktop` entry.
+
+Debian's packaged `stterm` ignores Xresources for font and colors, so the installer compiles st 0.9.3 itself.
+
+### Terminal (st)
+
+The installer builds st 0.9.3 from source into `~/.local/bin/st` with:
+
+- **Catppuccin Mocha** colors compiled into `config.h`
+- **font size** `pixelsize = 14 × scale / 100` (28 px at 200%)
+- **border** scaled with the rest of the rice
+
+It also writes `~/.local/share/applications/st.desktop` so Rofi launches the same binary, and installs the
+`st-256color` terminfo entry under `~/.terminfo`. The distro `stterm`/`st` package is installed only as a
+fallback if the build fails.
+
+Run the installer **as your user**, not with `sudo`, so the build artifacts and configs are owned by you. It
+elevates with `sudo` only for the package installation.
 
 ### Palette
 
@@ -203,6 +220,9 @@ cd ~/dev/projects/i3-rice
 ./install-i3-rice.sh                   # install packages + write configs
 ```
 
+Run it as your normal user; it calls `sudo` only for package installation. Running the whole script with
+`sudo` is not recommended because the st build and config files would be owned by root.
+
 Useful flags:
 
 | Flag | Effect |
@@ -220,15 +240,17 @@ What it changes:
 
 1. Detects the distro's package manager and installs the mapped package set. If a name is unavailable it warns,
    retries package by package, and continues.
-2. Adds the invoking user to the admin group (`sudo` on Debian/Ubuntu/Mint, `wheel` on the others), unless
+2. Builds st 0.9.3 from source into `~/.local/bin/st`, with Catppuccin Mocha colors and a font size derived from
+   `--scale`. A distro `stterm`/`st` package is installed as a fallback.
+3. Adds the invoking user to the admin group (`sudo` on Debian/Ubuntu/Mint, `wheel` on the others), unless
    `--no-admin-group` is passed.
-3. Backs up any existing config as `<file>.bak-<timestamp>`.
-4. Writes i3, Polybar, Rofi, Picom, and Dunst configs under `~/.config/`.
-5. Writes HiDPI resources (`~/.config/i3/Xresources`, `~/.config/i3/scale.env`) and wires them into
+4. Backs up any existing config as `<file>.bak-<timestamp>`.
+5. Writes i3, Polybar, Rofi, Picom, and Dunst configs under `~/.config/`.
+6. Writes HiDPI resources (`~/.config/i3/Xresources`, `~/.config/i3/scale.env`) and wires them into
    `~/.xprofile` and `~/.xsessionrc` via a managed block.
-6. Makes `~/.config/polybar/launch.sh` executable.
-7. Warns if `~/Pictures/wallpaper.jpg` is missing.
-8. Reports any commands or fonts that are still missing at the end.
+7. Makes `~/.config/polybar/launch.sh` executable.
+8. Warns if `~/Pictures/wallpaper.jpg` is missing.
+9. Reports any commands or fonts that are still missing at the end.
 
 It does **not** change your login session, GTK theme, or display configuration.
 
@@ -295,8 +317,8 @@ X11 does not have a single global fractional-scale switch, so a few apps need th
 - **Firefox:** `about:config` → `layout.css.devPixelsPerPx` = `2.0` for 200% (or `-1` to follow the system DPI).
 - **VS Code:** launch with `--force-device-scale-factor=2`, or set `window.zoomLevel` to about `2`.
 - **Steam:** add `-forcedesktopscaling 2` to the Steam launch options.
-- **st:** the font comes from `st.font` in `~/.config/i3/Xresources`, with `pixelsize` derived from
-  `--scale`. Restart st after changing it.
+- **st:** rebuilt by the installer with `pixelsize` derived from `--scale`; rerun the installer after changing
+  the scale.
 - **NVIDIA:** make sure the monitor is running at its native 4K resolution so 2× is pixel-perfect.
 
 ---
@@ -335,6 +357,7 @@ This costs GPU time and is off by default.
 | Rofi shows no icons | install an icon theme or remove `show-icons` from `config.rasi` |
 | Lock screen does not appear | check `xss-lock` is running: `pgrep -a xss-lock` |
 | `usermod: command not found` | it is in `passwd` (Debian) / `shadow-utils` (Fedora) / `shadow` (others); use `/usr/sbin/usermod` or add `/usr/sbin` to `PATH` |
+| st text still tiny | the distro `stterm` is being used; run `./install-i3-rice.sh` (without `--no-packages`) to build `~/.local/bin/st`, then check `command -v st` |
 | Scaling env vars empty after login | the DM skipped `~/.xprofile`/`~/.xsessionrc`; source `~/.config/i3/scale.env` from your session startup, or start i3 via a wrapper that sources it |
 
 ---
