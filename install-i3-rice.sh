@@ -215,7 +215,7 @@ case "$PM" in
     PKG_GROUPS[screenshot]="maim"
     PKG_GROUPS[clipboard]="xclip"
     PKG_GROUPS[media]="playerctl"
-    PKG_GROUPS[audio-gui]="pavucontrol"
+    PKG_GROUPS[audio-gui]="pavucontrol pasystray"
     PKG_GROUPS[audio-cli]="pulseaudio-utils"
     PKG_GROUPS[network]="network-manager-gnome"
     PKG_GROUPS[xutils]="x11-xserver-utils"
@@ -242,7 +242,7 @@ case "$PM" in
     PKG_GROUPS[screenshot]="maim"
     PKG_GROUPS[clipboard]="xclip"
     PKG_GROUPS[media]="playerctl"
-    PKG_GROUPS[audio-gui]="pavucontrol"
+    PKG_GROUPS[audio-gui]="pavucontrol pasystray"
     PKG_GROUPS[audio-cli]="pulseaudio-utils"
     PKG_GROUPS[network]="network-manager-applet"
     PKG_GROUPS[xutils]="xorg-x11-server-utils xrandr"
@@ -269,7 +269,7 @@ case "$PM" in
     PKG_GROUPS[screenshot]="maim"
     PKG_GROUPS[clipboard]="xclip"
     PKG_GROUPS[media]="playerctl"
-    PKG_GROUPS[audio-gui]="pavucontrol"
+    PKG_GROUPS[audio-gui]="pavucontrol pasystray"
     PKG_GROUPS[audio-cli]="libpulse"
     PKG_GROUPS[network]="network-manager-applet"
     PKG_GROUPS[xutils]="xorg-xrandr xorg-xset"
@@ -296,7 +296,7 @@ case "$PM" in
     PKG_GROUPS[screenshot]="maim"
     PKG_GROUPS[clipboard]="xclip"
     PKG_GROUPS[media]="playerctl"
-    PKG_GROUPS[audio-gui]="pavucontrol"
+    PKG_GROUPS[audio-gui]="pavucontrol pasystray"
     PKG_GROUPS[audio-cli]="pulseaudio-utils"
     PKG_GROUPS[network]="NetworkManager-applet"
     PKG_GROUPS[xutils]="xrandr xset"
@@ -323,7 +323,7 @@ case "$PM" in
     PKG_GROUPS[screenshot]="maim"
     PKG_GROUPS[clipboard]="xclip"
     PKG_GROUPS[media]="playerctl"
-    PKG_GROUPS[audio-gui]="pavucontrol"
+    PKG_GROUPS[audio-gui]="pavucontrol pasystray"
     PKG_GROUPS[audio-cli]="pulseaudio-utils"
     PKG_GROUPS[network]="network-manager-applet"
     PKG_GROUPS[xutils]="xrandr xset"
@@ -963,6 +963,7 @@ bindsym $mod+Shift+5 move container to workspace $ws5
 bindsym $mod+Return exec --no-startup-id $term
 bindsym $mod+d exec $menu
 bindsym $mod+c exec --no-startup-id yad --calendar --title=Calendar --undecorated --center --fixed --skip-taskbar --close-on-unfocus
+bindsym $mod+a exec --no-startup-id pavucontrol
 bindsym $mod+Tab exec --no-startup-id rofi -dpi @SCALE_DPI@ -show window
 bindsym $mod+q kill
 
@@ -1038,6 +1039,7 @@ exec_always --no-startup-id ~/.config/polybar/launch.sh
 exec --no-startup-id picom --config ~/.config/picom/picom.conf
 exec --no-startup-id dunst
 exec --no-startup-id nm-applet
+exec --no-startup-id pasystray
 exec --no-startup-id xss-lock --transfer-sleep-lock -- i3lock -n -c 1e1e2e
 exec --no-startup-id sh -c '[ -f ~/Pictures/wallpaper.jpg ] && feh --bg-fill ~/Pictures/wallpaper.jpg'
 
@@ -1119,6 +1121,10 @@ format-volume = <label-volume>
 label-volume = @ICON_VOLUME@ %percentage%%
 label-muted = @ICON_VOLUME@ MUTED
 label-muted-foreground = ${colors.foreground-alt}
+click-left = pactl set-sink-mute @DEFAULT_SINK@ toggle
+click-right = pavucontrol
+scroll-up = pactl set-sink-volume @DEFAULT_SINK@ +5%
+scroll-down = pactl set-sink-volume @DEFAULT_SINK@ -5%
 
 [module/memory]
 type = internal/memory
@@ -1422,7 +1428,7 @@ fi
 
 if [ "$DRY_RUN" = 0 ]; then
   missing=()
-  for cmd in i3 polybar rofi picom dunst feh i3lock xss-lock maim xclip pactl nm-applet yad; do
+  for cmd in i3 polybar rofi picom dunst feh i3lock xss-lock maim xclip pactl nm-applet yad pasystray; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
   if [ ! -x "$ST_BIN" ] && ! command -v st >/dev/null 2>&1; then

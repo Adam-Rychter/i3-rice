@@ -96,7 +96,7 @@ Revisit Sway when Mint or Ubuntu packages Sway 1.10 or newer.
 | GTK theming | LXAppearance | `lxappearance` | GUI |
 | Terminal | st 0.9.3 (built from source) | build deps + `stterm` fallback | compiled `config.h` |
 | Media keys | playerctl | `playerctl` | i3 config |
-| Audio | PulseAudio tools + pavucontrol | `pavucontrol`, `pulseaudio-utils` | i3 config / GUI |
+| Audio | PulseAudio tools + pavucontrol + pasystray | `pavucontrol`, `pulseaudio-utils`, `pasystray` | i3 config / GUI |
 | Network applet | nm-applet | `network-manager-gnome` | started from the i3 config |
 | Notifications helper | notify-send | `libnotify-bin` | — |
 | Calendar popup | yad | `yad` | `$mod+c` / click the Polybar date |
@@ -120,6 +120,9 @@ supported family (see [Distro support](#distro-support)).
   and a font size derived from `--scale`. It installs to `~/.local/bin/st` with a matching `.desktop` entry.
 - **Polybar tray** (`tray-position = right`) hosts `nm-applet` and other XEmbed tray icons on the right.
 - **yad** provides a minimal calendar popup: click the Polybar date or press `$mod+c`.
+- **Audio:** the Polybar volume module toggles mute on left-click, opens `pavucontrol` on right-click, and
+  changes volume with the scroll wheel. `pasystray` adds a right-corner tray menu for output/input device
+  selection. `$mod+a` opens `pavucontrol` directly.
 
 Debian's packaged `stterm` ignores Xresources for font and colors, so the installer compiles st 0.9.3 itself.
 
@@ -189,6 +192,8 @@ The rice stays minimal by using Polybar modules instead of a desktop panel:
 - **Calendar:** `yad --calendar` opens from `$mod+c` or by clicking the date module.
 - **Right corner:** Polybar’s built-in tray (`tray-position = right`) holds XEmbed icons such as `nm-applet`.
 - **Volume / memory / CPU:** Polybar’s `internal/pulseaudio`, `internal/memory`, and `internal/cpu` modules.
+  Left-click the volume label to mute, scroll to change level, right-click for the full `pavucontrol` mixer.
+  `pasystray` sits in the tray and lets you pick the default output/input device.
 
 If you prefer standalone applets over panel modules:
 
@@ -214,6 +219,7 @@ Avoid GNOME/KDE applets here; they pull in large dependency stacks and do not fi
 | `Super+Return` | open st |
 | `Super+d` | app launcher (Rofi drun) |
 | `Super+c` | calendar popup (yad) |
+| `Super+a` | audio mixer (pavucontrol) |
 | `Super+Tab` | window switcher |
 | `Super+q` | close window |
 | `Super+h/j/k/l` or arrows | focus left/down/up/right |
