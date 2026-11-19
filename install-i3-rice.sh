@@ -1,0 +1,922 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# install-i3-rice.sh — Catppuccin Mocha i3 rice
+# Target: any Linux with X11; package names are mapped for apt, dnf, pacman,
+# zypper, and apk. Developed against Linux Mint 22.3 on X11/NVIDIA.
+#
+# Installs the window manager stack and writes the configs described in
+# memory.md. Existing config files are backed up as <file>.bak-<timestamp>.
+#
+# Usage:
+#   ./install-i3-rice.sh                      # install packages and write configs
+#   ./install-i3-rice.sh --dry-run            # show what would happen, change nothing
+#   ./install-i3-rice.sh --no-packages        # write configs only
+#   ./install-i3-rice.sh --list-packages      # show resolved package names
+#   ./install-i3-rice.sh --package-manager dnf
+#   ./install-i3-rice.sh --user alice          # add alice to the sudo/wheel group
+#   ./install-i3-rice.sh --no-admin-group      # leave group membership unchanged
+#   ./install-i3-rice.sh --help
+#
+# After it finishes, start i3 from your display manager, or run `startx` with
+# `exec i3` in ~/.xinitrc.
+
+DRY_RUN=0
+INSTALL_PACKAGES=1
+LIST_PACKAGES=0
+PM_OVERRIDE="${I3_RICE_PM:-}"
+TARGET_USER="${I3_RICE_USER:-}"
+SKIP_ADMIN_GROUP=0
+
+usage() {
+  cat <<'EOF'
+install-i3-rice.sh — Catppuccin Mocha i3 rice
+Target: any Linux with X11; package names are mapped for apt, dnf, pacman,
+zypper, and apk. Developed against Linux Mint 22.3 on X11/NVIDIA.
+
+Installs the window manager stack and writes the configs described in
+memory.md. Existing config files are backed up as <file>.bak-<timestamp>.
+
+Usage:
+  ./install-i3-rice.sh                      # install packages and write configs
+  ./install-i3-rice.sh --dry-run            # show what would happen, change nothing
+  ./install-i3-rice.sh --no-packages        # write configs only
+  ./install-i3-rice.sh --list-packages      # show resolved package names
+  ./install-i3-rice.sh --package-manager dnf
+  ./install-i3-rice.sh --user alice          # add alice to the sudo/wheel group
+  ./install-i3-rice.sh --no-admin-group      # leave group membership unchanged
+  ./install-i3-rice.sh --help
+
+After it finishes, start i3 from your display manager, or run `startx` with
+`exec i3` in ~/.xinitrc.
+EOF
+  exit "${1:-1}"
+}
+
+log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+run()  { if [ "$DRY_RUN" = 1 ]; then printf '[dry-run]'; printf ' %q' "$@"; printf '\n'; else "$@"; fi; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1 ;;
+    --no-packages) INSTALL_PACKAGES=0 ;;
+    --list-packages) LIST_PACKAGES=1 ;;
+    --package-manager)
+      [ $# -ge 2 ] || die "--package-manager needs a value"
+      PM_OVERRIDE="$2"
+      shift
+      ;;
+    --user)
+      [ $# -ge 2 ] || die "--user needs a value"
+      TARGET_USER="$2"
+      shift
+      ;;
+    --no-admin-group) SKIP_ADMIN_GROUP=1 ;;
+    -h|--help) usage 0 ;;
+    *)
+      echo "install-i3-rice: unknown option: $1" >&2
+      usage 1
+      ;;
+  esac
+  shift
+done
+
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+# --- distro / package manager detection -------------------------------------
+
+detect_pm() {
+  local candidate
+  for candidate in apt-get dnf pacman zypper apk; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  echo "unknown"
+}
+
+PM="${PM_OVERRIDE:-$(detect_pm)}"
+case "$PM" in
+  apt-get|apt) PM="apt" ;;
+  dnf|pacman|zypper|apk) ;;
+  *)
+    if [ -n "$PM_OVERRIDE" ] && [ "$PM_OVERRIDE" != "unknown" ]; then
+      die "unsupported package manager: $PM_OVERRIDE (use apt, dnf, pacman, zypper, or apk)"
+    fi
+    if [ "$INSTALL_PACKAGES" = 1 ] || [ "$LIST_PACKAGES" = 1 ]; then
+      die "no supported package manager found (apt, dnf, pacman, zypper, apk); use --no-packages"
+    fi
+    PM="none"
+    ;;
+esac
+
+DISTRO="unknown Linux"
+if [ -r /etc/os-release ]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  DISTRO="${PRETTY_NAME:-${NAME:-unknown Linux}}"
+fi
+
+declare -A PKG_GROUPS=()
+GROUP_ORDER=(
+  wm bar launcher compositor notifications wallpaper screenshot clipboard
+  media audio-gui audio-cli network xutils kb xprop display-gui theming fonts notify elevate
+)
+
+case "$PM" in
+  apt)
+    PM_LABEL="apt (Debian/Ubuntu/Mint)"
+    REFRESH=(apt-get update)
+    INSTALL=(apt-get install -y --no-install-recommends)
+    PKG_GROUPS[wm]="i3 i3lock xss-lock"
+    PKG_GROUPS[bar]="polybar"
+    PKG_GROUPS[launcher]="rofi"
+    PKG_GROUPS[compositor]="picom"
+    PKG_GROUPS[notifications]="dunst"
+    PKG_GROUPS[wallpaper]="feh"
+    PKG_GROUPS[screenshot]="maim"
+    PKG_GROUPS[clipboard]="xclip"
+    PKG_GROUPS[media]="playerctl"
+    PKG_GROUPS[audio-gui]="pavucontrol"
+    PKG_GROUPS[audio-cli]="pulseaudio-utils"
+    PKG_GROUPS[network]="network-manager-gnome"
+    PKG_GROUPS[xutils]="x11-xserver-utils"
+    PKG_GROUPS[kb]="x11-xkb-utils"
+    PKG_GROUPS[xprop]="x11-utils"
+    PKG_GROUPS[display-gui]="arandr"
+    PKG_GROUPS[theming]="lxappearance"
+    PKG_GROUPS[fonts]="fonts-jetbrains-mono"
+    PKG_GROUPS[notify]="libnotify-bin"
+    PKG_GROUPS[elevate]="sudo passwd"
+    ;;
+  dnf)
+    PM_LABEL="dnf (Fedora/RHEL)"
+    REFRESH=()
+    INSTALL=(dnf install -y)
+    PKG_GROUPS[wm]="i3 i3lock xss-lock"
+    PKG_GROUPS[bar]="polybar"
+    PKG_GROUPS[launcher]="rofi"
+    PKG_GROUPS[compositor]="picom"
+    PKG_GROUPS[notifications]="dunst"
+    PKG_GROUPS[wallpaper]="feh"
+    PKG_GROUPS[screenshot]="maim"
+    PKG_GROUPS[clipboard]="xclip"
+    PKG_GROUPS[media]="playerctl"
+    PKG_GROUPS[audio-gui]="pavucontrol"
+    PKG_GROUPS[audio-cli]="pulseaudio-utils"
+    PKG_GROUPS[network]="network-manager-applet"
+    PKG_GROUPS[xutils]="xorg-x11-server-utils xrandr"
+    PKG_GROUPS[kb]="xorg-x11-xkb-utils"
+    PKG_GROUPS[xprop]="xorg-x11-utils"
+    PKG_GROUPS[display-gui]="arandr"
+    PKG_GROUPS[theming]="lxappearance"
+    PKG_GROUPS[fonts]="jetbrains-mono-fonts"
+    PKG_GROUPS[notify]="libnotify"
+    PKG_GROUPS[elevate]="shadow-utils"
+    ;;
+  pacman)
+    PM_LABEL="pacman (Arch/Manjaro)"
+    REFRESH=()
+    INSTALL=(pacman -S --needed --noconfirm)
+    PKG_GROUPS[wm]="i3-wm i3lock xss-lock"
+    PKG_GROUPS[bar]="polybar"
+    PKG_GROUPS[launcher]="rofi"
+    PKG_GROUPS[compositor]="picom"
+    PKG_GROUPS[notifications]="dunst"
+    PKG_GROUPS[wallpaper]="feh"
+    PKG_GROUPS[screenshot]="maim"
+    PKG_GROUPS[clipboard]="xclip"
+    PKG_GROUPS[media]="playerctl"
+    PKG_GROUPS[audio-gui]="pavucontrol"
+    PKG_GROUPS[audio-cli]="libpulse"
+    PKG_GROUPS[network]="network-manager-applet"
+    PKG_GROUPS[xutils]="xorg-xrandr xorg-xset"
+    PKG_GROUPS[kb]="xorg-setxkbmap"
+    PKG_GROUPS[xprop]="xorg-xprop"
+    PKG_GROUPS[display-gui]="arandr"
+    PKG_GROUPS[theming]="lxappearance"
+    PKG_GROUPS[fonts]="ttf-jetbrains-mono"
+    PKG_GROUPS[notify]="libnotify"
+    PKG_GROUPS[elevate]="shadow"
+    ;;
+  zypper)
+    PM_LABEL="zypper (openSUSE)"
+    REFRESH=(zypper --non-interactive refresh)
+    INSTALL=(zypper --non-interactive install --no-recommends)
+    PKG_GROUPS[wm]="i3 i3lock xss-lock"
+    PKG_GROUPS[bar]="polybar"
+    PKG_GROUPS[launcher]="rofi"
+    PKG_GROUPS[compositor]="picom"
+    PKG_GROUPS[notifications]="dunst"
+    PKG_GROUPS[wallpaper]="feh"
+    PKG_GROUPS[screenshot]="maim"
+    PKG_GROUPS[clipboard]="xclip"
+    PKG_GROUPS[media]="playerctl"
+    PKG_GROUPS[audio-gui]="pavucontrol"
+    PKG_GROUPS[audio-cli]="pulseaudio-utils"
+    PKG_GROUPS[network]="NetworkManager-applet"
+    PKG_GROUPS[xutils]="xrandr xset"
+    PKG_GROUPS[kb]="setxkbmap"
+    PKG_GROUPS[xprop]="xprop"
+    PKG_GROUPS[display-gui]="arandr"
+    PKG_GROUPS[theming]="lxappearance"
+    PKG_GROUPS[fonts]="jetbrains-mono-fonts"
+    PKG_GROUPS[notify]="libnotify-tools"
+    PKG_GROUPS[elevate]="shadow"
+    ;;
+  apk)
+    PM_LABEL="apk (Alpine)"
+    REFRESH=(apk update)
+    INSTALL=(apk add --no-cache)
+    PKG_GROUPS[wm]="i3wm i3lock xss-lock"
+    PKG_GROUPS[bar]="polybar"
+    PKG_GROUPS[launcher]="rofi"
+    PKG_GROUPS[compositor]="picom"
+    PKG_GROUPS[notifications]="dunst"
+    PKG_GROUPS[wallpaper]="feh"
+    PKG_GROUPS[screenshot]="maim"
+    PKG_GROUPS[clipboard]="xclip"
+    PKG_GROUPS[media]="playerctl"
+    PKG_GROUPS[audio-gui]="pavucontrol"
+    PKG_GROUPS[audio-cli]="pulseaudio-utils"
+    PKG_GROUPS[network]="network-manager-applet"
+    PKG_GROUPS[xutils]="xrandr xset"
+    PKG_GROUPS[kb]="setxkbmap"
+    PKG_GROUPS[xprop]="xprop"
+    PKG_GROUPS[display-gui]="arandr"
+    PKG_GROUPS[theming]="lxappearance"
+    PKG_GROUPS[fonts]="font-jetbrains-mono"
+    PKG_GROUPS[notify]="libnotify"
+    PKG_GROUPS[elevate]="shadow"
+    ;;
+  none) ;;
+esac
+
+case "$PM" in
+  apt) ADMIN_GROUP="sudo" ;;
+  dnf|pacman|zypper|apk) ADMIN_GROUP="wheel" ;;
+  *) ADMIN_GROUP="" ;;
+esac
+
+PACKAGES=()
+for group in "${GROUP_ORDER[@]}"; do
+  for pkg in ${PKG_GROUPS[$group]:-}; do
+    PACKAGES+=("$pkg")
+  done
+done
+
+if [ "$LIST_PACKAGES" = 1 ]; then
+  echo "distro:  $DISTRO"
+  echo "manager: $PM_LABEL"
+  echo "admin group: ${ADMIN_GROUP:-(none)}"
+  for group in "${GROUP_ORDER[@]}"; do
+    printf '%-12s %s\n' "$group" "${PKG_GROUPS[$group]:-(none)}"
+  done
+  exit 0
+fi
+
+log "distro: $DISTRO"
+[ "$PM" = "none" ] || log "package manager: $PM_LABEL"
+
+SUDO=()
+if [ "$INSTALL_PACKAGES" = 1 ] && [ "$(id -u)" -ne 0 ]; then
+  command -v sudo >/dev/null 2>&1 || die "run as root, install sudo, or use --no-packages"
+  SUDO=(sudo)
+fi
+
+write_config() {
+  local target="$1"
+  if [ "$DRY_RUN" = 1 ]; then
+    cat >/dev/null
+    log "[dry-run] would write $target"
+    return 0
+  fi
+  mkdir -p "$(dirname "$target")"
+  if [ -e "$target" ]; then
+    cp -a "$target" "$target.bak-$STAMP"
+    log "backed up $target -> $target.bak-$STAMP"
+  fi
+  cat > "$target"
+  log "wrote $target"
+}
+
+install_packages() {
+  if [ "$PM" = "none" ]; then
+    warn "no supported package manager; skipping package installation"
+    return 0
+  fi
+
+  log "installing ${#PACKAGES[@]} packages with $PM_LABEL"
+
+  if [ ${#REFRESH[@]} -gt 0 ]; then
+    run "${SUDO[@]}" "${REFRESH[@]}" || warn "package index refresh failed; continuing"
+  fi
+
+  if run "${SUDO[@]}" "${INSTALL[@]}" "${PACKAGES[@]}"; then
+    log "package installation finished"
+    return 0
+  fi
+
+  warn "batch install failed; retrying one package at a time"
+  local failed=()
+  local pkg
+  for pkg in "${PACKAGES[@]}"; do
+    if run "${SUDO[@]}" "${INSTALL[@]}" "$pkg"; then
+      :
+    else
+      failed+=("$pkg")
+      warn "could not install $pkg"
+    fi
+  done
+  if [ ${#failed[@]} -gt 0 ]; then
+    warn "packages not installed: ${failed[*]}"
+    warn "configs are still written; missing commands are listed after the install"
+  fi
+}
+
+detect_target_user() {
+  if [ -n "$TARGET_USER" ]; then
+    printf '%s\n' "$TARGET_USER"
+    return 0
+  fi
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    printf '%s\n' "$SUDO_USER"
+    return 0
+  fi
+  local login
+  login="$(logname 2>/dev/null || true)"
+  if [ -n "$login" ] && [ "$login" != "root" ]; then
+    printf '%s\n' "$login"
+    return 0
+  fi
+  if [ -n "${USER:-}" ] && [ "$USER" != "root" ] && id "$USER" >/dev/null 2>&1; then
+    printf '%s\n' "$USER"
+    return 0
+  fi
+  printf '\n'
+}
+
+find_tool() {
+  local name="$1" candidate
+  if candidate="$(command -v "$name" 2>/dev/null)" && [ -n "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  for candidate in "/usr/sbin/$name" "/sbin/$name" "/usr/bin/$name" "/bin/$name"; do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+admin_tool_hint() {
+  case "$PM" in
+    apt) echo "apt-get install -y passwd" ;;
+    dnf) echo "dnf install -y shadow-utils" ;;
+    pacman) echo "pacman -S shadow" ;;
+    zypper) echo "zypper install shadow" ;;
+    apk) echo "apk add shadow" ;;
+    *) echo "install your distro's passwd/shadow package" ;;
+  esac
+}
+
+ensure_admin_group() {
+  if [ "$SKIP_ADMIN_GROUP" = 1 ]; then
+    log "skipping admin group changes (--no-admin-group)"
+    return 0
+  fi
+  [ -n "$ADMIN_GROUP" ] || return 0
+
+  local user tool
+  user="$(detect_target_user)"
+  if [ -z "$user" ]; then
+    warn "could not determine which user to add to the $ADMIN_GROUP group"
+    warn "rerun with --user <username>, or run: usermod -aG $ADMIN_GROUP <username>"
+    return 0
+  fi
+  if ! id "$user" >/dev/null 2>&1; then
+    warn "user '$user' does not exist; skipping $ADMIN_GROUP group membership"
+    return 0
+  fi
+  if id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qx "$ADMIN_GROUP"; then
+    log "$user is already in the $ADMIN_GROUP group"
+    return 0
+  fi
+  if ! grep -q "^${ADMIN_GROUP}:" /etc/group 2>/dev/null; then
+    warn "group '$ADMIN_GROUP' does not exist; create it or add $user manually"
+    return 0
+  fi
+
+  log "adding $user to the $ADMIN_GROUP group"
+
+  # usermod lives in /usr/sbin on most distros and is often missing from PATH.
+  if tool="$(find_tool usermod)"; then
+    if run "${SUDO[@]}" "$tool" -aG "$ADMIN_GROUP" "$user"; then
+      log "log out and back in (or run 'newgrp $ADMIN_GROUP') for the new group to apply"
+      return 0
+    fi
+    warn "usermod failed: $tool -aG $ADMIN_GROUP $user"
+  fi
+
+  # gpasswd is a portable fallback and does the same group edit.
+  if tool="$(find_tool gpasswd)"; then
+    if run "${SUDO[@]}" "$tool" -a "$user" "$ADMIN_GROUP"; then
+      log "log out and back in (or run 'newgrp $ADMIN_GROUP') for the new group to apply"
+      return 0
+    fi
+    warn "gpasswd failed: $tool -a $user $ADMIN_GROUP"
+  fi
+
+  warn "neither usermod nor gpasswd is available"
+  warn "install the provider package first: $(admin_tool_hint)"
+  warn "then run: usermod -aG $ADMIN_GROUP $user"
+}
+
+if [ "$INSTALL_PACKAGES" = 1 ]; then
+  install_packages
+  ensure_admin_group
+else
+  log "skipping package installation (--no-packages)"
+fi
+
+log "writing i3 config"
+write_config "$HOME/.config/i3/config" <<'I3CONF'
+# i3 config — Catppuccin Mocha
+# Generated by install-i3-rice.sh. Reload with $mod+Shift+c, restart with $mod+Shift+r.
+
+set $mod Mod4
+set $term kitty
+set $menu --no-startup-id rofi -show drun
+
+set $ws1 "1:term"
+set $ws2 "2:code"
+set $ws3 "3:web"
+set $ws4 "4:games"
+set $ws5 "5:media"
+
+set $base   #1e1e2e
+set $text   #cdd6f4
+set $blue   #89b4fa
+set $mauve  #cba6f7
+set $red    #f38ba8
+
+font pango:JetBrains Mono 10
+
+# Look and feel
+default_border pixel 2
+default_floating_border pixel 2
+hide_edge_borders smart
+smart_borders on
+gaps inner 8
+gaps outer 8
+smart_gaps on
+
+client.focused          $blue $base $text $blue $blue
+client.focused_inactive $base $base $text $base $base
+client.unfocused        $base $base $text $base $base
+client.urgent           $red  $base $text $red  $red
+client.placeholder      $base $base $text $base $base
+client.background       $base
+
+# Workspaces: one per app
+assign [class="^kitty$"] $ws1
+assign [class="^(Code|code)$"] $ws2
+assign [class="^(firefox|LibreWolf|brave-browser|google-chrome|chromium|Chromium)$"] $ws3
+assign [class="^(steam|Steam)$"] $ws4
+assign [class="^steam_app_"] $ws4
+assign [class="^vlc$"] $ws5
+
+# Floating windows
+for_window [window_type="dialog"] floating enable
+for_window [class="^(pavucontrol|Lxappearance|Arandr)$"] floating enable
+for_window [class="^Steam$" title="^(Friends List|Steam - News|Settings|Steam Settings)$"] floating enable
+
+bindsym $mod+1 workspace $ws1
+bindsym $mod+2 workspace $ws2
+bindsym $mod+3 workspace $ws3
+bindsym $mod+4 workspace $ws4
+bindsym $mod+5 workspace $ws5
+bindsym $mod+Shift+1 move container to workspace $ws1
+bindsym $mod+Shift+2 move container to workspace $ws2
+bindsym $mod+Shift+3 move container to workspace $ws3
+bindsym $mod+Shift+4 move container to workspace $ws4
+bindsym $mod+Shift+5 move container to workspace $ws5
+
+# Launch and manage windows
+bindsym $mod+Return exec --no-startup-id $term
+bindsym $mod+d exec $menu
+bindsym $mod+Tab exec --no-startup-id rofi -show window
+bindsym $mod+q kill
+
+# Focus (vimmer style, arrows also work)
+bindsym $mod+h focus left
+bindsym $mod+j focus down
+bindsym $mod+k focus up
+bindsym $mod+l focus right
+bindsym $mod+Left focus left
+bindsym $mod+Down focus down
+bindsym $mod+Up focus up
+bindsym $mod+Right focus right
+
+# Move windows
+bindsym $mod+Shift+h move left
+bindsym $mod+Shift+j move down
+bindsym $mod+Shift+k move up
+bindsym $mod+Shift+l move right
+bindsym $mod+Shift+Left move left
+bindsym $mod+Shift+Down move down
+bindsym $mod+Shift+Up move up
+bindsym $mod+Shift+Right move right
+
+# Layout
+bindsym $mod+b split h
+bindsym $mod+v split v
+bindsym $mod+f fullscreen toggle
+bindsym $mod+Shift+space floating toggle
+bindsym $mod+r mode "resize"
+
+# Session
+bindsym $mod+Escape exec --no-startup-id i3lock -n -c 1e1e2e
+bindsym $mod+Shift+c reload
+bindsym $mod+Shift+r restart
+bindsym $mod+Shift+e exec --no-startup-id i3-nagbar -t warning -m 'Exit i3?' -B 'Yes, exit' 'i3-msg exit'
+
+# Screenshots (region selection)
+bindsym Print exec --no-startup-id sh -c 'maim -s | xclip -selection clipboard -t image/png'
+bindsym $mod+Print exec --no-startup-id sh -c 'mkdir -p ~/Pictures && maim -s ~/Pictures/screenshot-$(date +%Y%m%d-%H%M%S).png'
+
+# Audio and media keys
+bindsym XF86AudioRaiseVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ +5%
+bindsym XF86AudioLowerVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ -5%
+bindsym XF86AudioMute exec --no-startup-id pactl set-sink-mute @DEFAULT_SINK@ toggle
+bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOURCE@ toggle
+bindsym XF86AudioPlay exec --no-startup-id playerctl play-pause
+bindsym XF86AudioNext exec --no-startup-id playerctl next
+bindsym XF86AudioPrev exec --no-startup-id playerctl previous
+
+mode "resize" {
+    bindsym h resize shrink width 10 px or 10 ppt
+    bindsym j resize grow height 10 px or 10 ppt
+    bindsym k resize shrink height 10 px or 10 ppt
+    bindsym l resize grow width 10 px or 10 ppt
+    bindsym Left resize shrink width 10 px or 10 ppt
+    bindsym Down resize grow height 10 px or 10 ppt
+    bindsym Up resize shrink height 10 px or 10 ppt
+    bindsym Right resize grow width 10 px or 10 ppt
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+
+# i3bar is disabled; polybar draws the bar.
+bar {
+    mode invisible
+}
+
+# Autostart
+exec_always --no-startup-id ~/.config/polybar/launch.sh
+exec --no-startup-id picom --config ~/.config/picom/picom.conf
+exec --no-startup-id dunst
+exec --no-startup-id nm-applet
+exec --no-startup-id xss-lock --transfer-sleep-lock -- i3lock -n -c 1e1e2e
+exec --no-startup-id sh -c '[ -f ~/Pictures/wallpaper.jpg ] && feh --bg-fill ~/Pictures/wallpaper.jpg'
+
+# Uncomment and adjust after install:
+# exec --no-startup-id setxkbmap us
+# exec --no-startup-id xrandr --output DP-1 --mode 2560x1440 --rate 144
+I3CONF
+
+log "writing polybar config"
+write_config "$HOME/.config/polybar/config.ini" <<'POLYBARCONF'
+[colors]
+background = #1e1e2e
+background-alt = #313244
+foreground = #cdd6f4
+foreground-alt = #6c7086
+primary = #89b4fa
+secondary = #cba6f7
+alert = #f38ba8
+
+[bar/main]
+monitor = ${env:MONITOR:}
+width = 100%
+height = 28
+radius = 0
+fixed-center = true
+background = ${colors.background}
+foreground = ${colors.foreground}
+line-size = 2
+line-color = ${colors.primary}
+padding-left = 1
+padding-right = 1
+module-margin-left = 1
+module-margin-right = 1
+font-0 = JetBrains Mono:size=10;2
+modules-left = i3
+modules-center = date
+modules-right = pulseaudio memory cpu
+
+[module/i3]
+type = internal/i3
+format = <label-state> <label-mode>
+label-mode-padding = 2
+label-mode-foreground = ${colors.background}
+label-mode-background = ${colors.primary}
+label-focused = %name%
+label-focused-background = ${colors.primary}
+label-focused-foreground = ${colors.background}
+label-focused-underline = ${colors.primary}
+label-focused-padding = 2
+label-unfocused = %name%
+label-unfocused-padding = 2
+label-visible = %name%
+label-visible-underline = ${colors.secondary}
+label-visible-padding = 2
+label-urgent = %name%
+label-urgent-background = ${colors.alert}
+label-urgent-foreground = ${colors.background}
+label-urgent-padding = 2
+
+[module/date]
+type = internal/date
+interval = 5
+date = %Y-%m-%d
+time = %H:%M
+label = %date%  %time%
+label-foreground = ${colors.foreground}
+
+[module/pulseaudio]
+type = internal/pulseaudio
+format-volume = <label-volume>
+label-volume = VOL %percentage%%
+label-muted = MUTED
+label-muted-foreground = ${colors.foreground-alt}
+
+[module/memory]
+type = internal/memory
+interval = 5
+format = RAM <label>
+label = %percentage_used%%
+label-foreground = ${colors.foreground}
+
+[module/cpu]
+type = internal/cpu
+interval = 2
+format = CPU <label>
+label = %percentage%%
+label-foreground = ${colors.foreground}
+
+[settings]
+screenchange-reload = true
+compositing-background = source
+compositing-foreground = over
+POLYBARCONF
+
+log "writing polybar launcher"
+write_config "$HOME/.config/polybar/launch.sh" <<'POLYBARLAUNCH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Kill existing bars, then launch one per connected monitor.
+pkill -x polybar 2>/dev/null || true
+while pgrep -u "$UID" -x polybar >/dev/null 2>&1; do
+  sleep 0.2
+done
+
+if ! command -v xrandr >/dev/null 2>&1; then
+  polybar --reload main &
+  exit 0
+fi
+
+monitors=$(xrandr --query 2>/dev/null | awk '/ connected/ { print $1 }') || monitors=""
+
+if [ -z "$monitors" ]; then
+  polybar --reload main &
+else
+  while IFS= read -r monitor; do
+    [ -n "$monitor" ] || continue
+    MONITOR="$monitor" polybar --reload main &
+  done <<< "$monitors"
+fi
+POLYBARLAUNCH
+
+log "writing rofi config"
+write_config "$HOME/.config/rofi/config.rasi" <<'ROFICONF'
+configuration {
+    modi: "drun,run,window";
+    show-icons: true;
+    terminal: "kitty";
+    drun-display-format: "{name}";
+    display-drun: "Apps";
+    display-run: "Run";
+    display-window: "Windows";
+    font: "JetBrains Mono 11";
+}
+
+@import "catppuccin-mocha.rasi"
+ROFICONF
+
+write_config "$HOME/.config/rofi/catppuccin-mocha.rasi" <<'ROFITHEME'
+* {
+    bg: #1e1e2e;
+    bg-alt: #313244;
+    fg: #cdd6f4;
+    fg-alt: #6c7086;
+    accent: #89b4fa;
+    urgent: #f38ba8;
+
+    background-color: transparent;
+    text-color: @fg;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    spacing: 0;
+}
+
+window {
+    width: 40%;
+    background-color: @bg;
+    border: 2px;
+    border-color: @accent;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+mainbox {
+    children: [inputbar, listview];
+    spacing: 8px;
+}
+
+inputbar {
+    background-color: @bg-alt;
+    border-radius: 6px;
+    padding: 8px 12px;
+    children: [prompt, entry];
+}
+
+prompt {
+    text-color: @accent;
+    margin: 0 8px 0 0;
+}
+
+entry {
+    text-color: @fg;
+    placeholder: "Search...";
+    placeholder-color: @fg-alt;
+}
+
+listview {
+    lines: 8;
+    columns: 1;
+    spacing: 4px;
+    scrollbar: false;
+}
+
+element {
+    padding: 8px 12px;
+    border-radius: 6px;
+    background-color: transparent;
+    text-color: @fg;
+}
+
+element selected {
+    background-color: @accent;
+    text-color: @bg;
+}
+
+element-text {
+    vertical-align: 0.5;
+}
+
+element-icon {
+    size: 1.2em;
+}
+ROFITHEME
+
+log "writing picom config"
+write_config "$HOME/.config/picom/picom.conf" <<'PICOMCONF'
+# Catppuccin Mocha picom — glx, vsync, shadows, rounded corners, no blur.
+backend = "glx";
+vsync = true;
+
+shadow = true;
+shadow-radius = 12;
+shadow-opacity = 0.45;
+shadow-offset-x = -12;
+shadow-offset-y = -12;
+shadow-exclude = [
+  "window_type = 'dock'",
+  "window_type = 'desktop'",
+  "class_g = 'Polybar'",
+];
+
+corner-radius = 8;
+rounded-corners-exclude = [
+  "window_type = 'dock'",
+  "window_type = 'desktop'",
+  "class_g = 'Polybar'",
+];
+
+frame-opacity = 1.0;
+inactive-opacity = 1.0;
+active-opacity = 1.0;
+
+blur-background = false;
+blur-method = "none";
+
+focus-exclude = [
+  "class_g = 'Steam'",
+  "class_g = 'i3lock'",
+];
+
+# Reduce flicker on some NVIDIA/X11 setups. Remove if it causes artifacts.
+glx-no-stencil = true;
+PICOMCONF
+
+log "writing dunst config"
+write_config "$HOME/.config/dunst/dunstrc" <<'DUNSTCONF'
+[global]
+    monitor = 0
+    follow = mouse
+    width = 320
+    height = 120
+    origin = top-right
+    offset = 12x12
+    frame_width = 2
+    frame_color = "#89b4fa"
+    separator_color = frame
+    font = JetBrains Mono 10
+    corner_radius = 8
+    background = "#1e1e2e"
+    foreground = "#cdd6f4"
+    timeout = 8
+    transparency = 0
+    padding = 12
+    horizontal_padding = 14
+    icon_position = left
+    max_icon_size = 48
+    markup = full
+
+[urgency_low]
+    background = "#1e1e2e"
+    foreground = "#cdd6f4"
+    frame_color = "#6c7086"
+    timeout = 5
+
+[urgency_normal]
+    background = "#1e1e2e"
+    foreground = "#cdd6f4"
+    frame_color = "#89b4fa"
+    timeout = 8
+
+[urgency_critical]
+    background = "#1e1e2e"
+    foreground = "#f38ba8"
+    frame_color = "#f38ba8"
+    timeout = 0
+DUNSTCONF
+
+if [ "$DRY_RUN" = 0 ]; then
+  chmod +x "$HOME/.config/polybar/launch.sh"
+fi
+
+if [ ! -f "$HOME/Pictures/wallpaper.jpg" ]; then
+  warn "no wallpaper at ~/Pictures/wallpaper.jpg — the background will stay black"
+fi
+
+if [ "$DRY_RUN" = 0 ]; then
+  missing=()
+  for cmd in i3 polybar rofi picom dunst feh i3lock xss-lock maim xclip pactl nm-applet kitty; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  if [ ${#missing[@]} -gt 0 ]; then
+    warn "missing commands: ${missing[*]}"
+    warn "install them with your package manager, or edit the configs that use them"
+  fi
+  if command -v fc-list >/dev/null 2>&1; then
+    if ! fc-list : family 2>/dev/null | grep -qi 'JetBrains Mono'; then
+      warn "JetBrains Mono is not installed; Pango/Polybar will fall back to a default font"
+    fi
+  fi
+fi
+
+log "done"
+cat <<'NEXT'
+
+Next steps:
+  1. Start i3: choose it at your display manager, or put `exec i3` in ~/.xinitrc and run `startx`.
+  2. Verify window classes: xprop WM_CLASS, then fix assign rules in ~/.config/i3/config.
+  3. Set your keyboard layout: edit ~/.config/i3/config, uncomment the setxkbmap line.
+  4. Set monitor mode/rate: xrandr --query, then uncomment the xrandr line.
+  5. Add a wallpaper at ~/Pictures/wallpaper.jpg.
+  6. Theme GTK apps with lxappearance (Catppuccin GTK theme and cursor).
+  7. Test video/games. On NVIDIA tearing, enable Force Full Composition Pipeline in nvidia-settings.
+  8. In a VM or with software rendering, if picom flickers or crashes, set
+     backend = "xrender" and vsync = false in ~/.config/picom/picom.conf.
+
+Reload i3 with $mod+Shift+c after editing its config.
+NEXT
