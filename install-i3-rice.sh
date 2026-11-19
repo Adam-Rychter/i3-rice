@@ -149,6 +149,9 @@ ST_VERSION="0.9.3"
 ST_BIN="$HOME/.local/bin/st"
 ST_BUILD_DIR="$HOME/.cache/i3-rice/st-$ST_VERSION"
 JETBRAINS_VERSION="2.304"
+NERD_FONT_VERSION="3.5.1"
+FONT_FAMILY="JetBrains Mono"
+ST_FONT_FAMILY="JetBrains Mono"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -428,6 +431,11 @@ apply_scaling() {
     sed -i \
       -e "s|@SCALE_DPI@|$DPI|g" \
       -e "s|@ST_TERM@|$ST_TERM|g" \
+      -e "s|@FONT_FAMILY@|$FONT_FAMILY|g" \
+      -e "s|@ICON_CALENDAR@|$ICON_CALENDAR|g" \
+      -e "s|@ICON_VOLUME@|$ICON_VOLUME|g" \
+      -e "s|@ICON_MEMORY@|$ICON_MEMORY|g" \
+      -e "s|@ICON_CPU@|$ICON_CPU|g" \
       -e "s|@I3_GAP_INNER@|$I3_GAP_INNER|g" \
       -e "s|@I3_GAP_OUTER@|$I3_GAP_OUTER|g" \
       -e "s|@I3_BORDER@|$I3_BORDER|g" \
@@ -665,7 +673,7 @@ install_st() {
   ' "$ST_BUILD_DIR/config.def.h" > "$ST_BUILD_DIR/config.h"
 
   sed -i \
-    -e "s|^static char \*font = .*|static char *font = \"JetBrains Mono:pixelsize=$ST_FONT_PX:antialias=true:autohint=true\";|" \
+    -e "s|^static char \*font = .*|static char *font = \"$ST_FONT_FAMILY:pixelsize=$ST_FONT_PX:antialias=true:autohint=true\";|" \
     -e "s|^static int borderpx = .*|static int borderpx = $I3_BORDER;|" \
     -e "s|^unsigned int defaultfg = .*|unsigned int defaultfg = 258;|" \
     -e "s|^unsigned int defaultbg = .*|unsigned int defaultbg = 259;|" \
@@ -706,80 +714,146 @@ DESKTOP
   log "installed $ST_BIN"
 }
 
-install_font() {
-  if command -v fc-list >/dev/null 2>&1; then
-    local families
-    families="$(fc-list : family 2>/dev/null || true)"
-    if grep -qi 'JetBrains Mono' <<< "$families"; then
-      log "JetBrains Mono is available"
-      return 0
-    fi
-  fi
+font_available() {
+  local needle="$1"
+  command -v fc-list >/dev/null 2>&1 || return 1
+  local families
+  families="$(fc-list : family 2>/dev/null || true)"
+  grep -qi "$needle" <<< "$families"
+}
 
-  log "JetBrains Mono not found; installing it under ~/.local/share/fonts"
-
-  if [ "$DRY_RUN" = 1 ]; then
-    log "[dry-run] would download JetBrains Mono $JETBRAINS_VERSION"
-    return 0
-  fi
-
-  local downloader=""
+install_nerd_font() {
+  local downloader="" file url
   if command -v curl >/dev/null 2>&1; then
     downloader="curl"
   elif command -v wget >/dev/null 2>&1; then
     downloader="wget"
   else
-    warn "cannot download JetBrains Mono; install curl or wget"
+    warn "cannot download the Nerd Font; install curl or wget"
+    return 1
+  fi
+
+  local dest="$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
+  local cache="$HOME/.cache/i3-rice/nerd-fonts"
+  local base="https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v$NERD_FONT_VERSION/patched-fonts/JetBrainsMono/Ligatures"
+  mkdir -p "$dest" "$cache"
+
+  for file in \
+    JetBrainsMonoNerdFont-Regular.ttf \
+    JetBrainsMonoNerdFont-Bold.ttf \
+    JetBrainsMonoNerdFont-Italic.ttf \
+    JetBrainsMonoNerdFont-BoldItalic.ttf \
+    JetBrainsMonoNerdFontMono-Regular.ttf \
+    JetBrainsMonoNerdFontMono-Bold.ttf \
+    JetBrainsMonoNerdFontMono-Italic.ttf \
+    JetBrainsMonoNerdFontMono-BoldItalic.ttf; do
+    url="$base/$file"
+    if [ ! -s "$cache/$file" ]; then
+      if [ "$downloader" = "curl" ]; then
+        curl -fsSL "$url" -o "$cache/$file" || return 1
+      else
+        wget -qO "$cache/$file" "$url" || return 1
+      fi
+    fi
+    cp -f "$cache/$file" "$dest/$file" || return 1
+  done
+
+  if command -v fc-cache >/dev/null 2>&1; then
+    fc-cache -f "$HOME/.local/share/fonts" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
+install_font() {
+  FONT_FAMILY="JetBrains Mono"
+  ST_FONT_FAMILY="JetBrains Mono"
+
+  if font_available 'JetBrainsMono Nerd Font'; then
+    FONT_FAMILY="JetBrainsMono Nerd Font"
+    ST_FONT_FAMILY="JetBrainsMono Nerd Font Mono"
+    log "JetBrainsMono Nerd Font is available"
     return 0
   fi
 
-  local extractor=""
+  log "JetBrainsMono Nerd Font not found; installing it under ~/.local/share/fonts"
+
+  if [ "$DRY_RUN" = 1 ]; then
+    log "[dry-run] would install JetBrainsMono Nerd Font $NERD_FONT_VERSION"
+    return 0
+  fi
+
+  if install_nerd_font && font_available 'JetBrainsMono Nerd Font'; then
+    FONT_FAMILY="JetBrainsMono Nerd Font"
+    ST_FONT_FAMILY="JetBrainsMono Nerd Font Mono"
+    log "installed JetBrainsMono Nerd Font under ~/.local/share/fonts"
+    return 0
+  fi
+
+  warn "could not install JetBrainsMono Nerd Font; trying standard JetBrains Mono"
+
+  if font_available 'JetBrains Mono'; then
+    log "using standard JetBrains Mono"
+    return 0
+  fi
+
+  local downloader="" extractor="" zip url extract
+  if command -v curl >/dev/null 2>&1; then
+    downloader="curl"
+  elif command -v wget >/dev/null 2>&1; then
+    downloader="wget"
+  else
+    warn "cannot download JetBrains Mono; using monospace"
+    FONT_FAMILY="monospace"
+    ST_FONT_FAMILY="monospace"
+    return 0
+  fi
+
   if command -v python3 >/dev/null 2>&1; then
     extractor="python3"
   elif command -v unzip >/dev/null 2>&1; then
     extractor="unzip"
   else
-    warn "cannot extract JetBrains Mono; install python3 or unzip"
+    warn "cannot extract JetBrains Mono; using monospace"
+    FONT_FAMILY="monospace"
+    ST_FONT_FAMILY="monospace"
     return 0
   fi
 
   mkdir -p "$HOME/.cache/i3-rice" "$HOME/.local/share/fonts/JetBrainsMono"
 
-  local zip="$HOME/.cache/i3-rice/JetBrainsMono-$JETBRAINS_VERSION.zip"
-  local url="https://github.com/JetBrains/JetBrainsMono/releases/download/v$JETBRAINS_VERSION/JetBrainsMono-$JETBRAINS_VERSION.zip"
+  zip="$HOME/.cache/i3-rice/JetBrainsMono-$JETBRAINS_VERSION.zip"
+  url="https://github.com/JetBrains/JetBrainsMono/releases/download/v$JETBRAINS_VERSION/JetBrainsMono-$JETBRAINS_VERSION.zip"
 
   if [ ! -s "$zip" ]; then
     log "downloading $url"
     if [ "$downloader" = "curl" ]; then
-      curl -fsSL "$url" -o "$zip" || { warn "font download failed"; return 0; }
+      curl -fsSL "$url" -o "$zip" || { warn "font download failed"; FONT_FAMILY="monospace"; ST_FONT_FAMILY="monospace"; return 0; }
     else
-      wget -qO "$zip" "$url" || { warn "font download failed"; return 0; }
+      wget -qO "$zip" "$url" || { warn "font download failed"; FONT_FAMILY="monospace"; ST_FONT_FAMILY="monospace"; return 0; }
     fi
   fi
 
-  local extract="$HOME/.cache/i3-rice/JetBrainsMono-$JETBRAINS_VERSION"
+  extract="$HOME/.cache/i3-rice/JetBrainsMono-$JETBRAINS_VERSION"
   rm -rf "$extract"
   mkdir -p "$extract"
   if [ "$extractor" = "python3" ]; then
-    python3 -m zipfile -e "$zip" "$extract" || { warn "font extraction failed"; return 0; }
+    python3 -m zipfile -e "$zip" "$extract" || { warn "font extraction failed"; FONT_FAMILY="monospace"; ST_FONT_FAMILY="monospace"; return 0; }
   else
-    unzip -q "$zip" -d "$extract" || { warn "font extraction failed"; return 0; }
+    unzip -q "$zip" -d "$extract" || { warn "font extraction failed"; FONT_FAMILY="monospace"; ST_FONT_FAMILY="monospace"; return 0; }
   fi
 
   find "$extract" -type f -name '*.ttf' -exec cp -f {} "$HOME/.local/share/fonts/JetBrainsMono/" \;
 
   if command -v fc-cache >/dev/null 2>&1; then
     fc-cache -f "$HOME/.local/share/fonts" >/dev/null 2>&1 || warn "fc-cache failed"
-  else
-    warn "fc-cache not found; install fontconfig"
   fi
 
-  local families
-  families="$(fc-list : family 2>/dev/null || true)"
-  if grep -qi 'JetBrains Mono' <<< "$families"; then
-    log "installed JetBrains Mono under ~/.local/share/fonts"
+  if font_available 'JetBrains Mono'; then
+    log "installed standard JetBrains Mono under ~/.local/share/fonts"
   else
-    warn "JetBrains Mono is still not visible to fontconfig"
+    warn "JetBrains Mono is still not visible; using monospace"
+    FONT_FAMILY="monospace"
+    ST_FONT_FAMILY="monospace"
   fi
 }
 
@@ -790,8 +864,22 @@ else
   log "skipping package installation (--no-packages)"
 fi
 
-install_st
 install_font
+install_st
+
+# Nerd Font icons for Polybar (left empty when only the standard font is available).
+if [[ "$FONT_FAMILY" == *Nerd* ]]; then
+  ICON_CALENDAR="$(printf '\uf073')"
+  ICON_VOLUME="$(printf '\uf028')"
+  ICON_MEMORY="$(printf '\uf538')"
+  ICON_CPU="$(printf '\uf2db')"
+else
+  ICON_CALENDAR=""
+  ICON_VOLUME=""
+  ICON_MEMORY=""
+  ICON_CPU=""
+fi
+
 if [ "$DRY_RUN" = 1 ]; then
   ST_TERM="$ST_BIN"
 elif [ -x "$ST_BIN" ]; then
@@ -823,7 +911,7 @@ set $blue   #89b4fa
 set $mauve  #cba6f7
 set $red    #f38ba8
 
-font pango:JetBrains Mono 10
+font pango:@FONT_FAMILY@ 10
 
 # Look and feel
 default_border pixel @I3_BORDER@
@@ -977,7 +1065,7 @@ padding-left = @BAR_PADDING@
 padding-right = @BAR_PADDING@
 module-margin-left = @BAR_MARGIN@
 module-margin-right = @BAR_MARGIN@
-font-0 = JetBrains Mono:size=10;2
+font-0 = @FONT_FAMILY@:size=10;2
 modules-left = i3
 modules-center = date
 modules-right = pulseaudio memory cpu
@@ -1008,27 +1096,27 @@ type = internal/date
 interval = 5
 date = %Y-%m-%d
 time = %H:%M
-label = %date%  %time%
+label = @ICON_CALENDAR@  %date%  %time%
 label-foreground = ${colors.foreground}
 
 [module/pulseaudio]
 type = internal/pulseaudio
 format-volume = <label-volume>
-label-volume = VOL %percentage%%
-label-muted = MUTED
+label-volume = @ICON_VOLUME@ %percentage%%
+label-muted = @ICON_VOLUME@ MUTED
 label-muted-foreground = ${colors.foreground-alt}
 
 [module/memory]
 type = internal/memory
 interval = 5
-format = RAM <label>
+format = @ICON_MEMORY@ <label>
 label = %percentage_used%%
 label-foreground = ${colors.foreground}
 
 [module/cpu]
 type = internal/cpu
 interval = 2
-format = CPU <label>
+format = @ICON_CPU@ <label>
 label = %percentage%%
 label-foreground = ${colors.foreground}
 
@@ -1076,7 +1164,7 @@ configuration {
     display-drun: "Apps";
     display-run: "Run";
     display-window: "Windows";
-    font: "JetBrains Mono 11";
+    font: "@FONT_FAMILY@ 11";
 }
 
 @import "catppuccin-mocha.rasi"
@@ -1194,8 +1282,8 @@ blur-method = "none";
 
 # Slightly translucent terminal windows.
 opacity-rule = [
-  "95:class_g = 'st'",
-  "95:class_g = 'St'",
+  "20:class_g = 'st'",
+  "20:class_g = 'St'",
 ];
 
 focus-exclude = [
@@ -1219,7 +1307,7 @@ write_config "$HOME/.config/dunst/dunstrc" <<'DUNSTCONF'
     frame_width = @DUNST_FRAME@
     frame_color = "#89b4fa"
     separator_color = frame
-    font = JetBrains Mono 10
+    font = @FONT_FAMILY@ 10
     corner_radius = @DUNST_RADIUS@
     background = "#1e1e2e"
     foreground = "#cdd6f4"
@@ -1328,8 +1416,8 @@ if [ "$DRY_RUN" = 0 ]; then
   fi
   if command -v fc-list >/dev/null 2>&1; then
     font_families="$(fc-list : family 2>/dev/null || true)"
-    if ! grep -qi 'JetBrains Mono' <<< "$font_families"; then
-      warn "JetBrains Mono is not installed; Pango/Polybar will fall back to a default font"
+    if ! grep -Eqi 'JetBrainsMono Nerd Font|JetBrains Mono' <<< "$font_families"; then
+      warn "JetBrainsMono Nerd Font / JetBrains Mono is not installed; Pango/Polybar will fall back"
     fi
   fi
 fi

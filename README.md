@@ -86,7 +86,7 @@ Revisit Sway when Mint or Ubuntu packages Sway 1.10 or newer.
 | Window manager | i3 4.23 | `i3` | `~/.config/i3/config` |
 | Status bar | Polybar | `polybar` | `~/.config/polybar/config.ini`, `launch.sh` |
 | Launcher | Rofi (drun/run/window) | `rofi` | `~/.config/rofi/config.rasi`, `catppuccin-mocha.rasi` |
-| Compositor | Picom (glx, vsync, small shadows, rounded corners, no blur; st at 95% opacity) | `picom` | `~/.config/picom/picom.conf` |
+| Compositor | Picom (glx, vsync, small shadows, rounded corners, no blur; st at 80% transparency) | `picom` | `~/.config/picom/picom.conf` |
 | Notifications | Dunst | `dunst` | `~/.config/dunst/dunstrc` |
 | Wallpaper | 4K neural whale + feh | `feh` | `wallpapers/deepseek-neural-whale-4k.jpg` → `~/Pictures/wallpaper.jpg` |
 | Lock / idle | i3lock + xss-lock | `i3lock`, `xss-lock` | i3 config |
@@ -99,7 +99,7 @@ Revisit Sway when Mint or Ubuntu packages Sway 1.10 or newer.
 | Audio | PulseAudio tools + pavucontrol | `pavucontrol`, `pulseaudio-utils` | i3 config / GUI |
 | Network applet | nm-applet | `network-manager-gnome` | started from the i3 config |
 | Notifications helper | notify-send | `libnotify-bin` | — |
-| Font | JetBrains Mono | distro package, or downloaded to `~/.local/share/fonts` | Polybar, Rofi, Dunst, i3 |
+| Font | JetBrainsMono Nerd Font | downloaded to `~/.local/share/fonts` (standard JetBrains Mono fallback) | Polybar, Rofi, Dunst, i3, st |
 
 The package names above are the Debian/Ubuntu ones. The installer maps them to the equivalent names for each
 supported family (see [Distro support](#distro-support)).
@@ -133,6 +133,17 @@ fallback if the build fails.
 
 Run the installer **as your user**, not with `sudo`, so the build artifacts and configs are owned by you. It
 elevates with `sudo` only for the package installation.
+
+### Fonts (Nerd Font)
+
+The rice uses **JetBrainsMono Nerd Font** everywhere: i3 titles, Polybar, Rofi, Dunst, and st.
+
+- The installer downloads the patched regular and Mono families (Regular, Bold, Italic, BoldItalic) into
+  `~/.local/share/fonts/JetBrainsMonoNerdFont` and runs `fc-cache`.
+- st uses the **Mono** variant so terminal glyphs align correctly; the rest of the UI uses the normal Nerd Font.
+- Polybar uses Nerd Font glyphs for the calendar, volume, memory, and CPU modules.
+- If the Nerd Font cannot be installed, the installer falls back to standard JetBrains Mono (then `monospace`)
+  and leaves the Polybar labels as text.
 
 ### Palette
 
@@ -246,8 +257,8 @@ What it changes:
    retries package by package, and continues.
 2. Builds st 0.9.3 from source into `~/.local/bin/st`, with Catppuccin Mocha colors and a font size derived from
    `--scale`. A distro `stterm`/`st` package is installed as a fallback.
-3. Installs JetBrains Mono from the distro package; if it is unavailable, downloads the official font release
-   into `~/.local/share/fonts` and refreshes the font cache.
+3. Installs **JetBrainsMono Nerd Font** (regular and Mono, four styles) into `~/.local/share/fonts` and
+   refreshes fontconfig. If that fails it falls back to standard JetBrains Mono, then `monospace`.
 4. Adds the invoking user to the admin group (`sudo` on Debian/Ubuntu/Mint, `wheel` on the others), unless
    `--no-admin-group` is passed.
 5. Backs up any existing config as `<file>.bak-<timestamp>`.
@@ -368,11 +379,15 @@ python3 wallpapers/generate.py    # requires Pillow
 | Notification style and timeouts | `~/.config/dunst/dunstrc` |
 | Palette | hex values in all four configs above |
 
-**Polybar icons:** the default bar uses text labels. To use icons, install a Nerd Font and change the
-Polybar `font-*` entries (and module formats) accordingly.
+**Polybar icons:** the bar uses JetBrainsMono Nerd Font glyphs for the calendar, volume, memory, and CPU
+modules. If the Nerd Font cannot be installed, the installer omits the icons and the labels fall back to text.
+To remove them manually, delete the `@ICON_*@` results from `~/.config/polybar/config.ini`.
 
 **Blur:** set `blur-background = true` and choose a `blur-method` in `picom.conf`, then restart picom.
 This costs GPU time and is off by default.
+
+**st transparency:** the number in the `opacity-rule` is the *opacity* percentage, so `20` means **80% transparent**;
+`80` would mean 20% transparent. st is excluded from shadows so the transparency stays clean.
 
 ---
 
@@ -393,7 +408,7 @@ This costs GPU time and is off by default.
 | `usermod: command not found` | it is in `passwd` (Debian) / `shadow-utils` (Fedora) / `shadow` (others); use `/usr/sbin/usermod` or add `/usr/sbin` to `PATH` |
 | st text still tiny | the distro `stterm` is being used; run `./install-i3-rice.sh` (without `--no-packages`) to build `~/.local/bin/st`, then check `command -v st` |
 | `st` not found in a new shell | `~/.local/bin` is added by the installer; log out/in or run `source ~/.profile`. i3 and Rofi use the absolute path regardless. |
-| JetBrains Mono missing | rerun the installer (it downloads the official release to `~/.local/share/fonts`) or install `fonts-jetbrains-mono` |
+| JetBrainsMono Nerd Font missing | rerun the installer (it downloads the patched TTFs to `~/.local/share/fonts`) or install standard JetBrains Mono |
 | Scaling env vars empty after login | the DM skipped `~/.xprofile`/`~/.xsessionrc`; source `~/.config/i3/scale.env` from your session startup, or start i3 via a wrapper that sources it |
 
 ---
