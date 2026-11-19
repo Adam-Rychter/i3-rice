@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+WALLPAPER_SRC="$SCRIPT_DIR/wallpapers/deepseek-neural-whale-4k.jpg"
+
 # install-i3-rice.sh — Catppuccin Mocha i3 rice
 # Target: any Linux with X11; package names are mapped for apt, dnf, pacman,
 # zypper, and apk. Developed against Linux Mint 22.3 on X11/NVIDIA.
@@ -1200,12 +1203,30 @@ update_managed_block "$HOME/.bashrc" "$PATH_BLOCK" path
 
 apply_scaling
 
+if [ -f "$WALLPAPER_SRC" ]; then
+  if [ "$DRY_RUN" = 1 ]; then
+    log "[dry-run] would install the packaged wallpaper to ~/Pictures/wallpaper.jpg"
+  else
+    mkdir -p "$HOME/Pictures"
+    if [ ! -f "$HOME/Pictures/wallpaper.jpg" ]; then
+      cp "$WALLPAPER_SRC" "$HOME/Pictures/wallpaper.jpg"
+      log "installed wallpaper -> ~/Pictures/wallpaper.jpg"
+    else
+      log "keeping existing ~/Pictures/wallpaper.jpg"
+    fi
+    if [ "$(id -u)" -ne 0 ] && command -v feh >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
+      feh --bg-fill "$HOME/Pictures/wallpaper.jpg" >/dev/null 2>&1 || true
+    fi
+  fi
+fi
+
 if [ "$DRY_RUN" = 0 ]; then
   chmod +x "$HOME/.config/polybar/launch.sh"
 fi
 
-if [ ! -f "$HOME/Pictures/wallpaper.jpg" ]; then
+if [ "$DRY_RUN" = 0 ] && [ ! -f "$HOME/Pictures/wallpaper.jpg" ]; then
   warn "no wallpaper at ~/Pictures/wallpaper.jpg — the background will stay black"
+  [ -f "$WALLPAPER_SRC" ] || warn "packaged wallpaper not found at $WALLPAPER_SRC"
 fi
 
 if [ "$DRY_RUN" = 0 ]; then
@@ -1238,7 +1259,7 @@ Next steps:
   2. Verify window classes: xprop WM_CLASS, then fix assign rules in ~/.config/i3/config.
   3. Set your keyboard layout: edit ~/.config/i3/config, uncomment the setxkbmap line.
   4. Set monitor mode/rate: xrandr --query, then uncomment the xrandr line.
-  5. Add a wallpaper at ~/Pictures/wallpaper.jpg.
+  5. The packaged wallpaper is at ~/Pictures/wallpaper.jpg; replace it if you like.
   6. Theme GTK apps with lxappearance (Catppuccin GTK theme and cursor).
   7. Test video/games. On NVIDIA tearing, enable Force Full Composition Pipeline in nvidia-settings.
   8. In a VM or with software rendering, if picom flickers or crashes, set

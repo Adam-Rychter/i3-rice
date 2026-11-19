@@ -88,7 +88,7 @@ Revisit Sway when Mint or Ubuntu packages Sway 1.10 or newer.
 | Launcher | Rofi (drun/run/window) | `rofi` | `~/.config/rofi/config.rasi`, `catppuccin-mocha.rasi` |
 | Compositor | Picom (glx, vsync, shadows, rounded corners, no blur) | `picom` | `~/.config/picom/picom.conf` |
 | Notifications | Dunst | `dunst` | `~/.config/dunst/dunstrc` |
-| Wallpaper | feh | `feh` | started from the i3 config |
+| Wallpaper | 4K neural whale + feh | `feh` | `wallpapers/deepseek-neural-whale-4k.jpg` → `~/Pictures/wallpaper.jpg` |
 | Lock / idle | i3lock + xss-lock | `i3lock`, `xss-lock` | i3 config |
 | Screenshots | maim + xclip | `maim`, `xclip` | i3 config |
 | Displays | xrandr / arandr | `x11-xserver-utils`, `arandr` | i3 config (commented) |
@@ -200,7 +200,11 @@ Steam popups (Friends List, News, Settings), `pavucontrol`, `arandr`, and `lxapp
 i3-rice/
 ├── README.md              this file
 ├── memory.md              project decisions, findings, and TODO
-└── install-i3-rice.sh     installer and config generator
+├── install-i3-rice.sh     installer and config generator
+└── wallpapers/
+    ├── README.md
+    ├── deepseek-neural-whale-4k.jpg
+    └── generate.py        regenerates the wallpaper with Pillow
 ```
 
 `install-i3-rice.sh` is the single source of truth for the dotfiles. It writes them from embedded heredocs,
@@ -250,8 +254,10 @@ What it changes:
    `~/.xprofile` and `~/.xsessionrc` via a managed block. It also adds `~/.local/bin` to `PATH` through
    managed blocks in `~/.profile` and `~/.bashrc`.
 7. Makes `~/.config/polybar/launch.sh` executable.
-8. Warns if `~/Pictures/wallpaper.jpg` is missing.
-9. Reports any commands or fonts that are still missing at the end.
+8. Installs the packaged 4K wallpaper to `~/Pictures/wallpaper.jpg` if that file does not exist, and applies
+   it with feh when run inside the session.
+9. Warns if `~/Pictures/wallpaper.jpg` is still missing.
+10. Reports any commands or fonts that are still missing at the end.
 
 It does **not** change your login session, GTK theme, or display configuration.
 
@@ -267,7 +273,8 @@ It does **not** change your login session, GTK theme, or display configuration.
    `exec --no-startup-id setxkbmap us`.
 4. **Set monitor mode and refresh rate**: run `xrandr --query`, then uncomment and adjust
    `exec --no-startup-id xrandr --output DP-1 --mode 2560x1440 --rate 144`.
-5. **Add a wallpaper** at `~/Pictures/wallpaper.jpg` (feh picks it up at login).
+5. **Wallpaper:** the installer places the packaged 4K art at `~/Pictures/wallpaper.jpg` (if you don't already
+   have one); feh picks it up at login. Replace it with your own if you prefer.
 6. **Theme GTK apps** with `lxappearance` (Catppuccin GTK theme and cursor).
 7. **Test video and games.** On NVIDIA, if you see tearing, open `nvidia-settings` →
    X Server Display Configuration → Advanced → enable **Force Full Composition Pipeline**.
@@ -324,6 +331,30 @@ X11 does not have a single global fractional-scale switch, so a few apps need th
 
 ---
 
+## Wallpaper
+
+The repo ships `wallpapers/deepseek-neural-whale-4k.jpg` (3840×2160): an original procedural illustration of a
+whale made from neural-network nodes in DeepSeek blue. It contains no third-party assets, logos, or text.
+
+The installer copies it to `~/Pictures/wallpaper.jpg` only if that file does not exist, so your own wallpaper is
+never overwritten. When run inside the i3 session it also calls `feh --bg-fill` immediately; otherwise the i3
+autostart applies it at login.
+
+Replace it at any time:
+
+```sh
+cp your-wallpaper.jpg ~/Pictures/wallpaper.jpg
+feh --bg-fill ~/Pictures/wallpaper.jpg
+```
+
+Regenerate or tweak the packaged art with:
+
+```sh
+python3 wallpapers/generate.py    # requires Pillow
+```
+
+---
+
 ## Customization
 
 | Want to change… | Edit |
@@ -349,7 +380,7 @@ This costs GPU time and is off by default.
 |---|---|
 | No bar after login | `~/.config/polybar/launch.sh` in a terminal; check `pgrep -a polybar` |
 | Bar on the wrong monitor | `xrandr --query`; `launch.sh` assigns one bar per connected output |
-| Black background | add `~/Pictures/wallpaper.jpg`, then `feh --bg-fill ~/Pictures/wallpaper.jpg` |
+| Black background | check `~/Pictures/wallpaper.jpg` exists, then `feh --bg-fill ~/Pictures/wallpaper.jpg` |
 | Screenshots fail | make sure `maim` and `xclip` are installed; `Print` needs `xclip` for the clipboard |
 | Tearing in games/video | enable Force Full Composition Pipeline in `nvidia-settings` |
 | VM / software rendering | set `backend = "xrender"` and `vsync = false` in `picom.conf`; disable shadows if still slow |
