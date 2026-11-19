@@ -117,8 +117,8 @@ esac
 spx() { echo $(( ($1 * SCALE + 50) / 100 )); }
 
 CURSOR_SIZE=$(spx 24)
-I3_GAP_INNER=$(spx 3)
-I3_GAP_OUTER=$(spx 4)
+I3_GAP_INNER=4
+I3_GAP_OUTER=6
 I3_BORDER=$(spx 2)
 BAR_HEIGHT=$(spx 28)
 BAR_PADDING=$(spx 1)
@@ -137,8 +137,8 @@ DUNST_RADIUS=$(spx 8)
 DUNST_PADDING=$(spx 12)
 DUNST_HPADDING=$(spx 14)
 DUNST_ICON=$(spx 48)
-PICOM_SHADOW_RADIUS=$(spx 12)
-PICOM_SHADOW_OFFSET="-$(spx 12)"
+PICOM_SHADOW_RADIUS=$(spx 4)
+PICOM_SHADOW_OFFSET="-$(spx 4)"
 PICOM_RADIUS=$(spx 8)
 ST_FONT_PX=$(spx 14)
 
@@ -1085,13 +1085,15 @@ vsync = true;
 
 shadow = true;
 shadow-radius = @PICOM_SHADOW_RADIUS@;
-shadow-opacity = 0.45;
+shadow-opacity = 0.30;
 shadow-offset-x = @PICOM_SHADOW_OFFSET@;
 shadow-offset-y = @PICOM_SHADOW_OFFSET@;
 shadow-exclude = [
   "window_type = 'dock'",
   "window_type = 'desktop'",
   "class_g = 'Polybar'",
+  "class_g = 'st'",
+  "class_g = 'St'",
 ];
 
 corner-radius = @PICOM_RADIUS@;
