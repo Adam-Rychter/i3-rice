@@ -86,7 +86,7 @@ Revisit Sway when Mint or Ubuntu packages Sway 1.10 or newer.
 | Window manager | i3 4.23 | `i3` | `~/.config/i3/config` |
 | Status bar | Polybar | `polybar` | `~/.config/polybar/config.ini`, `launch.sh` |
 | Launcher | Rofi (drun/run/window) | `rofi` | `~/.config/rofi/config.rasi`, `catppuccin-mocha.rasi` |
-| Compositor | Picom (glx, vsync, small shadows, rounded corners, no blur; st at 80% transparency) | `picom` | `~/.config/picom/picom.conf` |
+| Compositor | Picom (glx, vsync, small shadows, rounded corners, no blur; st at 20% transparency) | `picom` | `~/.config/picom/picom.conf` |
 | Notifications | Dunst | `dunst` | `~/.config/dunst/dunstrc` |
 | Wallpaper | 4K neural whale + feh | `feh` | `wallpapers/deepseek-neural-whale-4k.jpg` → `~/Pictures/wallpaper.jpg` |
 | Lock / idle | i3lock + xss-lock | `i3lock`, `xss-lock` | i3 config |
@@ -420,8 +420,8 @@ To remove them manually, delete the `@ICON_*@` results from `~/.config/polybar/c
 **Blur:** set `blur-background = true` and choose a `blur-method` in `picom.conf`, then restart picom.
 This costs GPU time and is off by default.
 
-**st transparency:** the number in the `opacity-rule` is the *opacity* percentage, so `20` means **80% transparent**;
-`80` would mean 20% transparent. st is excluded from shadows so the transparency stays clean.
+**st transparency:** the number in the `opacity-rule` is the *opacity* percentage, so `80` means **20% transparent**
+(default); `20` would mean 80% transparent. st is excluded from shadows so the transparency stays clean.
 
 ---
 

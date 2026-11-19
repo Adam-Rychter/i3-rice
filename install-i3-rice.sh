@@ -1304,10 +1304,10 @@ blur-method = "none";
 
 # Slightly translucent terminal windows.
 opacity-rule = [
-  "20:class_g = 'st'",
-  "20:class_g = 'St'",
-  "20:class_g = 'st-256color'",
-  "20:class_g = 'St-256color'",
+  "80:class_g = 'st'",
+  "80:class_g = 'St'",
+  "80:class_g = 'st-256color'",
+  "80:class_g = 'St-256color'",
 ];
 
 focus-exclude = [
