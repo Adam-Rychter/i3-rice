@@ -1080,10 +1080,14 @@ modules-center = date
 modules-right = pulseaudio memory cpu
 
 tray-position = right
-tray-padding = 4
-tray-maxsize = 16
+tray-padding = 6
+tray-maxsize = 24
 tray-background = ${colors.background}
 tray-foreground = ${colors.foreground}
+
+[bar/secondary]
+inherit = bar/main
+tray-position = none
 
 [module/i3]
 type = internal/i3
@@ -1167,9 +1171,18 @@ monitors=$(xrandr --query 2>/dev/null | awk '/ connected/ { print $1 }') || moni
 if [ -z "$monitors" ]; then
   polybar --reload main &
 else
+  primary=$(xrandr --query 2>/dev/null | awk '/ primary / { print $1; exit }')
+  if [ -z "$primary" ]; then
+    primary=$(printf '%s\n' "$monitors" | head -n1)
+  fi
+
   while IFS= read -r monitor; do
     [ -n "$monitor" ] || continue
-    MONITOR="$monitor" polybar --reload main &
+    if [ "$monitor" = "$primary" ]; then
+      MONITOR="$monitor" polybar --reload main &
+    else
+      MONITOR="$monitor" polybar --reload secondary &
+    fi
   done <<< "$monitors"
 fi
 POLYBARLAUNCH

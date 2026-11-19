@@ -119,6 +119,7 @@ supported family (see [Distro support](#distro-support)).
 - **st** is the terminal: CPU-rendered and very light (~13 MB), built from source with Catppuccin Mocha colors
   and a font size derived from `--scale`. It installs to `~/.local/bin/st` with a matching `.desktop` entry.
 - **Polybar tray** (`tray-position = right`) hosts `nm-applet` and other XEmbed tray icons on the right.
+  It is enabled only on the primary monitor's bar; secondary monitors use `[bar/secondary]` without a tray.
 - **yad** provides a minimal calendar popup: click the Polybar date or press `$mod+c`.
 - **Audio:** the Polybar volume module toggles mute on left-click, opens `pavucontrol` on right-click, and
   changes volume with the scroll wheel. `pasystray` adds a right-corner tray menu for output/input device
