@@ -930,7 +930,7 @@ client.placeholder      $base $base $text $base $base
 client.background       $base
 
 # Workspaces: one per app
-assign [class="^(st|St)$"] $ws1
+assign [class="^(st|St)"] $ws1
 assign [class="^(Code|code)$"] $ws2
 assign [class="^(firefox|LibreWolf|brave-browser|google-chrome|chromium|Chromium)$"] $ws3
 assign [class="^(steam|Steam)$"] $ws4
@@ -1264,6 +1264,8 @@ shadow-exclude = [
   "class_g = 'Polybar'",
   "class_g = 'st'",
   "class_g = 'St'",
+  "class_g = 'st-256color'",
+  "class_g = 'St-256color'",
 ];
 
 corner-radius = @PICOM_RADIUS@;
@@ -1284,6 +1286,8 @@ blur-method = "none";
 opacity-rule = [
   "20:class_g = 'st'",
   "20:class_g = 'St'",
+  "20:class_g = 'st-256color'",
+  "20:class_g = 'St-256color'",
 ];
 
 focus-exclude = [

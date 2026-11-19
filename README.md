@@ -408,6 +408,7 @@ This costs GPU time and is off by default.
 | `usermod: command not found` | it is in `passwd` (Debian) / `shadow-utils` (Fedora) / `shadow` (others); use `/usr/sbin/usermod` or add `/usr/sbin` to `PATH` |
 | st text still tiny | the distro `stterm` is being used; run `./install-i3-rice.sh` (without `--no-packages`) to build `~/.local/bin/st`, then check `command -v st` |
 | `st` not found in a new shell | `~/.local/bin` is added by the installer; log out/in or run `source ~/.profile`. i3 and Rofi use the absolute path regardless. |
+| st transparency not working | ensure picom is running (`pgrep -a picom`); `xprop WM_CLASS` on st should show `st-256color` — the rules match that class. Restart picom after editing `picom.conf`. |
 | JetBrainsMono Nerd Font missing | rerun the installer (it downloads the patched TTFs to `~/.local/share/fonts`) or install standard JetBrains Mono |
 | Scaling env vars empty after login | the DM skipped `~/.xprofile`/`~/.xsessionrc`; source `~/.config/i3/scale.env` from your session startup, or start i3 via a wrapper that sources it |
 
