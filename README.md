@@ -99,6 +99,8 @@ Revisit Sway when Mint or Ubuntu packages Sway 1.10 or newer.
 | Audio | PulseAudio tools + pavucontrol | `pavucontrol`, `pulseaudio-utils` | i3 config / GUI |
 | Network applet | nm-applet | `network-manager-gnome` | started from the i3 config |
 | Notifications helper | notify-send | `libnotify-bin` | — |
+| Calendar popup | yad | `yad` | `$mod+c` / click the Polybar date |
+| System tray | Polybar internal tray | `polybar` | right side of the bar |
 | Font | JetBrainsMono Nerd Font | downloaded to `~/.local/share/fonts` (standard JetBrains Mono fallback) | Polybar, Rofi, Dunst, i3, st |
 
 The package names above are the Debian/Ubuntu ones. The installer maps them to the equivalent names for each
@@ -116,6 +118,8 @@ supported family (see [Distro support](#distro-support)).
 - **maim** takes region screenshots; `Print` copies to the clipboard, `$mod+Print` saves to `~/Pictures`.
 - **st** is the terminal: CPU-rendered and very light (~13 MB), built from source with Catppuccin Mocha colors
   and a font size derived from `--scale`. It installs to `~/.local/bin/st` with a matching `.desktop` entry.
+- **Polybar tray** (`tray-position = right`) hosts `nm-applet` and other XEmbed tray icons on the right.
+- **yad** provides a minimal calendar popup: click the Polybar date or press `$mod+c`.
 
 Debian's packaged `stterm` ignores Xresources for font and colors, so the installer compiles st 0.9.3 itself.
 
@@ -178,6 +182,29 @@ Steam popups (Friends List, News, Settings), `pavucontrol`, `arandr`, and `lxapp
 
 ---
 
+## Applets and tray
+
+The rice stays minimal by using Polybar modules instead of a desktop panel:
+
+- **Calendar:** `yad --calendar` opens from `$mod+c` or by clicking the date module.
+- **Right corner:** Polybar’s built-in tray (`tray-position = right`) holds XEmbed icons such as `nm-applet`.
+- **Volume / memory / CPU:** Polybar’s `internal/pulseaudio`, `internal/memory`, and `internal/cpu` modules.
+
+If you prefer standalone applets over panel modules:
+
+| Need | Minimal option |
+|---|---|
+| Calendar | `gsimplecal`, `yad --calendar`, or `calcurse` in st |
+| Volume tray | `pasystray` |
+| Battery tray | `cbatticon` |
+| Standalone tray | `stalonetray` or `trayer` |
+| Bluetooth | `blueman-applet` |
+| Network | `nm-applet` (already installed) |
+
+Avoid GNOME/KDE applets here; they pull in large dependency stacks and do not fit a bare i3 session.
+
+---
+
 ## Keybindings
 
 `Mod` is **Super**.
@@ -186,6 +213,7 @@ Steam popups (Friends List, News, Settings), `pavucontrol`, `arandr`, and `lxapp
 |---|---|
 | `Super+Return` | open st |
 | `Super+d` | app launcher (Rofi drun) |
+| `Super+c` | calendar popup (yad) |
 | `Super+Tab` | window switcher |
 | `Super+q` | close window |
 | `Super+h/j/k/l` or arrows | focus left/down/up/right |
@@ -410,6 +438,8 @@ This costs GPU time and is off by default.
 | `st` not found in a new shell | `~/.local/bin` is added by the installer; log out/in or run `source ~/.profile`. i3 and Rofi use the absolute path regardless. |
 | st transparency not working | ensure picom is running (`pgrep -a picom`); `xprop WM_CLASS` on st should show `st-256color` — the rules match that class. Restart picom after editing `picom.conf`. |
 | JetBrainsMono Nerd Font missing | rerun the installer (it downloads the patched TTFs to `~/.local/share/fonts`) or install standard JetBrains Mono |
+| Tray icons missing | make sure `nm-applet` is running; Polybar’s tray is XEmbed-only, so SNI-only apps may need `xembedsniproxy` |
+| Calendar does not open | check `yad` is installed and run `yad --calendar` in a terminal |
 | Scaling env vars empty after login | the DM skipped `~/.xprofile`/`~/.xsessionrc`; source `~/.config/i3/scale.env` from your session startup, or start i3 via a wrapper that sources it |
 
 ---

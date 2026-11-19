@@ -197,7 +197,7 @@ fi
 declare -A PKG_GROUPS=()
 GROUP_ORDER=(
   wm terminal bar launcher compositor notifications wallpaper screenshot clipboard
-  media audio-gui audio-cli network xutils kb xprop display-gui theming fonts notify elevate
+  media audio-gui audio-cli network xutils kb xprop display-gui theming fonts notify calendar elevate
 )
 
 case "$PM" in
@@ -225,6 +225,7 @@ case "$PM" in
     PKG_GROUPS[theming]="lxappearance"
     PKG_GROUPS[fonts]="fonts-jetbrains-mono unzip"
     PKG_GROUPS[notify]="libnotify-bin"
+    PKG_GROUPS[calendar]="yad"
     PKG_GROUPS[elevate]="sudo passwd"
     ;;
   dnf)
@@ -251,6 +252,7 @@ case "$PM" in
     PKG_GROUPS[theming]="lxappearance"
     PKG_GROUPS[fonts]="jetbrains-mono-fonts unzip"
     PKG_GROUPS[notify]="libnotify"
+    PKG_GROUPS[calendar]="yad"
     PKG_GROUPS[elevate]="shadow-utils"
     ;;
   pacman)
@@ -277,6 +279,7 @@ case "$PM" in
     PKG_GROUPS[theming]="lxappearance"
     PKG_GROUPS[fonts]="ttf-jetbrains-mono unzip"
     PKG_GROUPS[notify]="libnotify"
+    PKG_GROUPS[calendar]="yad"
     PKG_GROUPS[elevate]="shadow"
     ;;
   zypper)
@@ -303,6 +306,7 @@ case "$PM" in
     PKG_GROUPS[theming]="lxappearance"
     PKG_GROUPS[fonts]="jetbrains-mono-fonts unzip"
     PKG_GROUPS[notify]="libnotify-tools"
+    PKG_GROUPS[calendar]="yad"
     PKG_GROUPS[elevate]="shadow"
     ;;
   apk)
@@ -329,6 +333,7 @@ case "$PM" in
     PKG_GROUPS[theming]="lxappearance"
     PKG_GROUPS[fonts]="font-jetbrains-mono unzip"
     PKG_GROUPS[notify]="libnotify"
+    PKG_GROUPS[calendar]="yad"
     PKG_GROUPS[elevate]="shadow"
     ;;
   none) ;;
@@ -940,6 +945,7 @@ assign [class="^vlc$"] $ws5
 # Floating windows
 for_window [window_type="dialog"] floating enable
 for_window [class="^(pavucontrol|Lxappearance|Arandr)$"] floating enable
+for_window [class="^(Yad|yad)$"] floating enable, move position center
 for_window [class="^Steam$" title="^(Friends List|Steam - News|Settings|Steam Settings)$"] floating enable
 
 bindsym $mod+1 workspace $ws1
@@ -956,6 +962,7 @@ bindsym $mod+Shift+5 move container to workspace $ws5
 # Launch and manage windows
 bindsym $mod+Return exec --no-startup-id $term
 bindsym $mod+d exec $menu
+bindsym $mod+c exec --no-startup-id yad --calendar --title=Calendar --undecorated --center --fixed --skip-taskbar --close-on-unfocus
 bindsym $mod+Tab exec --no-startup-id rofi -dpi @SCALE_DPI@ -show window
 bindsym $mod+q kill
 
@@ -1070,6 +1077,12 @@ modules-left = i3
 modules-center = date
 modules-right = pulseaudio memory cpu
 
+tray-position = right
+tray-padding = 4
+tray-maxsize = 16
+tray-background = ${colors.background}
+tray-foreground = ${colors.foreground}
+
 [module/i3]
 type = internal/i3
 format = <label-state> <label-mode>
@@ -1097,6 +1110,7 @@ interval = 5
 date = %Y-%m-%d
 time = %H:%M
 label = @ICON_CALENDAR@  %date%  %time%
+click-left = yad --calendar --title=Calendar --undecorated --center --fixed --skip-taskbar --close-on-unfocus
 label-foreground = ${colors.foreground}
 
 [module/pulseaudio]
@@ -1408,7 +1422,7 @@ fi
 
 if [ "$DRY_RUN" = 0 ]; then
   missing=()
-  for cmd in i3 polybar rofi picom dunst feh i3lock xss-lock maim xclip pactl nm-applet; do
+  for cmd in i3 polybar rofi picom dunst feh i3lock xss-lock maim xclip pactl nm-applet yad; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
   if [ ! -x "$ST_BIN" ] && ! command -v st >/dev/null 2>&1; then
