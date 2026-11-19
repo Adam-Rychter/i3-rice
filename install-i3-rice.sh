@@ -1113,6 +1113,12 @@ active-opacity = 1.0;
 blur-background = false;
 blur-method = "none";
 
+# Slightly translucent terminal windows.
+opacity-rule = [
+  "95:class_g = 'st'",
+  "95:class_g = 'St'",
+];
+
 focus-exclude = [
   "class_g = 'Steam'",
   "class_g = 'i3lock'",

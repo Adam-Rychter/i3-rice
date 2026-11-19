@@ -86,7 +86,7 @@ Revisit Sway when Mint or Ubuntu packages Sway 1.10 or newer.
 | Window manager | i3 4.23 | `i3` | `~/.config/i3/config` |
 | Status bar | Polybar | `polybar` | `~/.config/polybar/config.ini`, `launch.sh` |
 | Launcher | Rofi (drun/run/window) | `rofi` | `~/.config/rofi/config.rasi`, `catppuccin-mocha.rasi` |
-| Compositor | Picom (glx, vsync, shadows, rounded corners, no blur) | `picom` | `~/.config/picom/picom.conf` |
+| Compositor | Picom (glx, vsync, small shadows, rounded corners, no blur; st at 95% opacity) | `picom` | `~/.config/picom/picom.conf` |
 | Notifications | Dunst | `dunst` | `~/.config/dunst/dunstrc` |
 | Wallpaper | 4K neural whale + feh | `feh` | `wallpapers/deepseek-neural-whale-4k.jpg` → `~/Pictures/wallpaper.jpg` |
 | Lock / idle | i3lock + xss-lock | `i3lock`, `xss-lock` | i3 config |
@@ -362,7 +362,7 @@ python3 wallpapers/generate.py    # requires Pillow
 | Keybindings, gaps, borders, workspaces | `~/.config/i3/config` |
 | Bar modules, colors, height | `~/.config/polybar/config.ini` |
 | Launcher look | `~/.config/rofi/catppuccin-mocha.rasi` |
-| Shadows, corner radius, vsync, blur | `~/.config/picom/picom.conf` |
+| Shadows, corner radius, st opacity, vsync, blur | `~/.config/picom/picom.conf` |
 | Notification style and timeouts | `~/.config/dunst/dunstrc` |
 | Palette | hex values in all four configs above |
 
