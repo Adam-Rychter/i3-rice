@@ -120,9 +120,9 @@ esac
 spx() { echo $(( ($1 * SCALE + 50) / 100 )); }
 
 CURSOR_SIZE=$(spx 24)
-I3_GAP_INNER=4
-I3_GAP_OUTER=6
-I3_BORDER=$(spx 2)
+I3_GAP_INNER=2
+I3_GAP_OUTER=2
+I3_BORDER=2
 BAR_HEIGHT=$(spx 28)
 BAR_PADDING=$(spx 1)
 BAR_MARGIN=$(spx 1)
@@ -148,6 +148,7 @@ ST_FONT_PX=$(spx 14)
 ST_VERSION="0.9.3"
 ST_BIN="$HOME/.local/bin/st"
 ST_BUILD_DIR="$HOME/.cache/i3-rice/st-$ST_VERSION"
+JETBRAINS_VERSION="2.304"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -219,7 +220,7 @@ case "$PM" in
     PKG_GROUPS[xprop]="x11-utils"
     PKG_GROUPS[display-gui]="arandr"
     PKG_GROUPS[theming]="lxappearance"
-    PKG_GROUPS[fonts]="fonts-jetbrains-mono"
+    PKG_GROUPS[fonts]="fonts-jetbrains-mono unzip"
     PKG_GROUPS[notify]="libnotify-bin"
     PKG_GROUPS[elevate]="sudo passwd"
     ;;
@@ -245,7 +246,7 @@ case "$PM" in
     PKG_GROUPS[xprop]="xorg-x11-utils"
     PKG_GROUPS[display-gui]="arandr"
     PKG_GROUPS[theming]="lxappearance"
-    PKG_GROUPS[fonts]="jetbrains-mono-fonts"
+    PKG_GROUPS[fonts]="jetbrains-mono-fonts unzip"
     PKG_GROUPS[notify]="libnotify"
     PKG_GROUPS[elevate]="shadow-utils"
     ;;
@@ -271,7 +272,7 @@ case "$PM" in
     PKG_GROUPS[xprop]="xorg-xprop"
     PKG_GROUPS[display-gui]="arandr"
     PKG_GROUPS[theming]="lxappearance"
-    PKG_GROUPS[fonts]="ttf-jetbrains-mono"
+    PKG_GROUPS[fonts]="ttf-jetbrains-mono unzip"
     PKG_GROUPS[notify]="libnotify"
     PKG_GROUPS[elevate]="shadow"
     ;;
@@ -297,7 +298,7 @@ case "$PM" in
     PKG_GROUPS[xprop]="xprop"
     PKG_GROUPS[display-gui]="arandr"
     PKG_GROUPS[theming]="lxappearance"
-    PKG_GROUPS[fonts]="jetbrains-mono-fonts"
+    PKG_GROUPS[fonts]="jetbrains-mono-fonts unzip"
     PKG_GROUPS[notify]="libnotify-tools"
     PKG_GROUPS[elevate]="shadow"
     ;;
@@ -323,7 +324,7 @@ case "$PM" in
     PKG_GROUPS[xprop]="xprop"
     PKG_GROUPS[display-gui]="arandr"
     PKG_GROUPS[theming]="lxappearance"
-    PKG_GROUPS[fonts]="font-jetbrains-mono"
+    PKG_GROUPS[fonts]="font-jetbrains-mono unzip"
     PKG_GROUPS[notify]="libnotify"
     PKG_GROUPS[elevate]="shadow"
     ;;
@@ -705,6 +706,83 @@ DESKTOP
   log "installed $ST_BIN"
 }
 
+install_font() {
+  if command -v fc-list >/dev/null 2>&1; then
+    local families
+    families="$(fc-list : family 2>/dev/null || true)"
+    if grep -qi 'JetBrains Mono' <<< "$families"; then
+      log "JetBrains Mono is available"
+      return 0
+    fi
+  fi
+
+  log "JetBrains Mono not found; installing it under ~/.local/share/fonts"
+
+  if [ "$DRY_RUN" = 1 ]; then
+    log "[dry-run] would download JetBrains Mono $JETBRAINS_VERSION"
+    return 0
+  fi
+
+  local downloader=""
+  if command -v curl >/dev/null 2>&1; then
+    downloader="curl"
+  elif command -v wget >/dev/null 2>&1; then
+    downloader="wget"
+  else
+    warn "cannot download JetBrains Mono; install curl or wget"
+    return 0
+  fi
+
+  local extractor=""
+  if command -v python3 >/dev/null 2>&1; then
+    extractor="python3"
+  elif command -v unzip >/dev/null 2>&1; then
+    extractor="unzip"
+  else
+    warn "cannot extract JetBrains Mono; install python3 or unzip"
+    return 0
+  fi
+
+  mkdir -p "$HOME/.cache/i3-rice" "$HOME/.local/share/fonts/JetBrainsMono"
+
+  local zip="$HOME/.cache/i3-rice/JetBrainsMono-$JETBRAINS_VERSION.zip"
+  local url="https://github.com/JetBrains/JetBrainsMono/releases/download/v$JETBRAINS_VERSION/JetBrainsMono-$JETBRAINS_VERSION.zip"
+
+  if [ ! -s "$zip" ]; then
+    log "downloading $url"
+    if [ "$downloader" = "curl" ]; then
+      curl -fsSL "$url" -o "$zip" || { warn "font download failed"; return 0; }
+    else
+      wget -qO "$zip" "$url" || { warn "font download failed"; return 0; }
+    fi
+  fi
+
+  local extract="$HOME/.cache/i3-rice/JetBrainsMono-$JETBRAINS_VERSION"
+  rm -rf "$extract"
+  mkdir -p "$extract"
+  if [ "$extractor" = "python3" ]; then
+    python3 -m zipfile -e "$zip" "$extract" || { warn "font extraction failed"; return 0; }
+  else
+    unzip -q "$zip" -d "$extract" || { warn "font extraction failed"; return 0; }
+  fi
+
+  find "$extract" -type f -name '*.ttf' -exec cp -f {} "$HOME/.local/share/fonts/JetBrainsMono/" \;
+
+  if command -v fc-cache >/dev/null 2>&1; then
+    fc-cache -f "$HOME/.local/share/fonts" >/dev/null 2>&1 || warn "fc-cache failed"
+  else
+    warn "fc-cache not found; install fontconfig"
+  fi
+
+  local families
+  families="$(fc-list : family 2>/dev/null || true)"
+  if grep -qi 'JetBrains Mono' <<< "$families"; then
+    log "installed JetBrains Mono under ~/.local/share/fonts"
+  else
+    warn "JetBrains Mono is still not visible to fontconfig"
+  fi
+}
+
 if [ "$INSTALL_PACKAGES" = 1 ]; then
   install_packages
   ensure_admin_group
@@ -713,6 +791,7 @@ else
 fi
 
 install_st
+install_font
 if [ "$DRY_RUN" = 1 ]; then
   ST_TERM="$ST_BIN"
 elif [ -x "$ST_BIN" ]; then
@@ -1248,7 +1327,8 @@ if [ "$DRY_RUN" = 0 ]; then
     warn "install them with your package manager, or edit the configs that use them"
   fi
   if command -v fc-list >/dev/null 2>&1; then
-    if ! fc-list : family 2>/dev/null | grep -qi 'JetBrains Mono'; then
+    font_families="$(fc-list : family 2>/dev/null || true)"
+    if ! grep -qi 'JetBrains Mono' <<< "$font_families"; then
       warn "JetBrains Mono is not installed; Pango/Polybar will fall back to a default font"
     fi
   fi

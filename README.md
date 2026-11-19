@@ -99,7 +99,7 @@ Revisit Sway when Mint or Ubuntu packages Sway 1.10 or newer.
 | Audio | PulseAudio tools + pavucontrol | `pavucontrol`, `pulseaudio-utils` | i3 config / GUI |
 | Network applet | nm-applet | `network-manager-gnome` | started from the i3 config |
 | Notifications helper | notify-send | `libnotify-bin` | — |
-| Font | JetBrains Mono | `fonts-jetbrains-mono` | Polybar, Rofi, Dunst, i3 |
+| Font | JetBrains Mono | distro package, or downloaded to `~/.local/share/fonts` | Polybar, Rofi, Dunst, i3 |
 
 The package names above are the Debian/Ubuntu ones. The installer maps them to the equivalent names for each
 supported family (see [Distro support](#distro-support)).
@@ -246,18 +246,20 @@ What it changes:
    retries package by package, and continues.
 2. Builds st 0.9.3 from source into `~/.local/bin/st`, with Catppuccin Mocha colors and a font size derived from
    `--scale`. A distro `stterm`/`st` package is installed as a fallback.
-3. Adds the invoking user to the admin group (`sudo` on Debian/Ubuntu/Mint, `wheel` on the others), unless
+3. Installs JetBrains Mono from the distro package; if it is unavailable, downloads the official font release
+   into `~/.local/share/fonts` and refreshes the font cache.
+4. Adds the invoking user to the admin group (`sudo` on Debian/Ubuntu/Mint, `wheel` on the others), unless
    `--no-admin-group` is passed.
-4. Backs up any existing config as `<file>.bak-<timestamp>`.
-5. Writes i3, Polybar, Rofi, Picom, and Dunst configs under `~/.config/`.
-6. Writes HiDPI resources (`~/.config/i3/Xresources`, `~/.config/i3/scale.env`) and wires them into
+5. Backs up any existing config as `<file>.bak-<timestamp>`.
+6. Writes i3, Polybar, Rofi, Picom, and Dunst configs under `~/.config/`.
+7. Writes HiDPI resources (`~/.config/i3/Xresources`, `~/.config/i3/scale.env`) and wires them into
    `~/.xprofile` and `~/.xsessionrc` via a managed block. It also adds `~/.local/bin` to `PATH` through
    managed blocks in `~/.profile` and `~/.bashrc`.
-7. Makes `~/.config/polybar/launch.sh` executable.
-8. Installs the packaged 4K wallpaper to `~/Pictures/wallpaper.jpg` if that file does not exist, and applies
+8. Makes `~/.config/polybar/launch.sh` executable.
+9. Installs the packaged 4K wallpaper to `~/Pictures/wallpaper.jpg` if that file does not exist, and applies
    it with feh when run inside the session.
-9. Warns if `~/Pictures/wallpaper.jpg` is still missing.
-10. Reports any commands or fonts that are still missing at the end.
+10. Warns if `~/Pictures/wallpaper.jpg` is still missing.
+11. Reports any commands or fonts that are still missing at the end.
 
 It does **not** change your login session, GTK theme, or display configuration.
 
@@ -391,6 +393,7 @@ This costs GPU time and is off by default.
 | `usermod: command not found` | it is in `passwd` (Debian) / `shadow-utils` (Fedora) / `shadow` (others); use `/usr/sbin/usermod` or add `/usr/sbin` to `PATH` |
 | st text still tiny | the distro `stterm` is being used; run `./install-i3-rice.sh` (without `--no-packages`) to build `~/.local/bin/st`, then check `command -v st` |
 | `st` not found in a new shell | `~/.local/bin` is added by the installer; log out/in or run `source ~/.profile`. i3 and Rofi use the absolute path regardless. |
+| JetBrains Mono missing | rerun the installer (it downloads the official release to `~/.local/share/fonts`) or install `fonts-jetbrains-mono` |
 | Scaling env vars empty after login | the DM skipped `~/.xprofile`/`~/.xsessionrc`; source `~/.config/i3/scale.env` from your session startup, or start i3 via a wrapper that sources it |
 
 ---
