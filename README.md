@@ -94,7 +94,7 @@ Revisit Sway when Mint or Ubuntu packages Sway 1.10 or newer.
 | Displays | xrandr / arandr | `x11-xserver-utils`, `arandr` | i3 config (commented) |
 | Keyboard layout | setxkbmap | `x11-xkb-utils` | i3 config (commented) |
 | GTK theming | LXAppearance | `lxappearance` | GUI |
-| Terminal | kitty | already installed at `~/.local/kitty.app` | kitty config |
+| Terminal | st (simple terminal) | `stterm` (Debian) / `st` (others) | `~/.config/i3/Xresources` |
 | Media keys | playerctl | `playerctl` | i3 config |
 | Audio | PulseAudio tools + pavucontrol | `pavucontrol`, `pulseaudio-utils` | i3 config / GUI |
 | Network applet | nm-applet | `network-manager-gnome` | started from the i3 config |
@@ -114,6 +114,8 @@ supported family (see [Distro support](#distro-support)).
 - **Dunst** handles desktop notifications with Catppuccin-colored urgency levels.
 - **xss-lock** ties the lock screen to suspend and idle; `$mod+Escape` locks manually.
 - **maim** takes region screenshots; `Print` copies to the clipboard, `$mod+Print` saves to `~/Pictures`.
+- **st** is the terminal: CPU-rendered and very light (~13 MB), configured entirely through Xresources with
+  Catppuccin colors and a font size that follows `--scale`.
 
 ### Palette
 
@@ -138,7 +140,7 @@ One workspace per app. Rules are `assign` entries in `~/.config/i3/config`.
 
 | Key | Workspace | Assigned classes |
 |---|---|---|
-| `Super+1` | `1:term` | `kitty` |
+| `Super+1` | `1:term` | `st` |
 | `Super+2` | `2:code` | `Code` |
 | `Super+3` | `3:web` | `firefox`, `LibreWolf`, `brave-browser`, `google-chrome`, `chromium` |
 | `Super+4` | `4:games` | `steam`, `Steam`, `steam_app_*` |
@@ -154,7 +156,7 @@ Steam popups (Friends List, News, Settings), `pavucontrol`, `arandr`, and `lxapp
 
 | Key | Action |
 |---|---|
-| `Super+Return` | open kitty |
+| `Super+Return` | open st |
 | `Super+d` | app launcher (Rofi drun) |
 | `Super+Tab` | window switcher |
 | `Super+q` | close window |
@@ -293,7 +295,8 @@ X11 does not have a single global fractional-scale switch, so a few apps need th
 - **Firefox:** `about:config` → `layout.css.devPixelsPerPx` = `2.0` for 200% (or `-1` to follow the system DPI).
 - **VS Code:** launch with `--force-device-scale-factor=2`, or set `window.zoomLevel` to about `2`.
 - **Steam:** add `-forcedesktopscaling 2` to the Steam launch options.
-- **kitty:** set `font_size` in `kitty.conf`; it also follows the Xft DPI.
+- **st:** the font comes from `st.font` in `~/.config/i3/Xresources`, with `pixelsize` derived from
+  `--scale`. Restart st after changing it.
 - **NVIDIA:** make sure the monitor is running at its native 4K resolution so 2× is pixel-perfect.
 
 ---
