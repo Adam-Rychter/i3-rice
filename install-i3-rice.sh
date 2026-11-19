@@ -376,13 +376,13 @@ write_config() {
 }
 
 update_managed_block() {
-  local file="$1" content="$2"
-  local begin="# >>> i3-rice scaling >>>"
-  local end="# <<< i3-rice scaling <<<"
+  local file="$1" content="$2" name="${3:-scaling}"
+  local begin="# >>> i3-rice $name >>>"
+  local end="# <<< i3-rice $name <<<"
   local tmp
 
   if [ "$DRY_RUN" = 1 ]; then
-    log "[dry-run] would update the scaling block in $file"
+    log "[dry-run] would update the $name block in $file"
     return 0
   fi
 
@@ -405,7 +405,7 @@ update_managed_block() {
   } > "$file"
 
   rm -f "$tmp"
-  log "updated the scaling block in $file"
+  log "updated the $name block in $file"
 }
 
 apply_scaling() {
@@ -1174,13 +1174,25 @@ export QT_AUTO_SCREEN_SCALE_FACTOR=0
 export QT_FONT_DPI=96
 export QT_SCALE_FACTOR=$SCALE_FACTOR
 export XCURSOR_SIZE=$CURSOR_SIZE
+
+# st is installed in ~/.local/bin; keep it on PATH.
+case ":\$PATH:" in
+  *":\$HOME/.local/bin:"*) ;;
+  *) export PATH="\$HOME/.local/bin:\$PATH" ;;
+esac
 ENV
 
 SCALE_BLOCK='[ -f "$HOME/.config/i3/scale.env" ] && . "$HOME/.config/i3/scale.env"
 [ -f "$HOME/.config/i3/Xresources" ] && xrdb -merge "$HOME/.config/i3/Xresources"'
+PATH_BLOCK='case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) export PATH="$HOME/.local/bin:$PATH" ;;
+esac'
 log "wiring scaling into the X session"
 update_managed_block "$HOME/.xprofile" "$SCALE_BLOCK"
 update_managed_block "$HOME/.xsessionrc" "$SCALE_BLOCK"
+update_managed_block "$HOME/.profile" "$PATH_BLOCK" path
+update_managed_block "$HOME/.bashrc" "$PATH_BLOCK" path
 
 apply_scaling
 

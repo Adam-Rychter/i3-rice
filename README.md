@@ -247,7 +247,8 @@ What it changes:
 4. Backs up any existing config as `<file>.bak-<timestamp>`.
 5. Writes i3, Polybar, Rofi, Picom, and Dunst configs under `~/.config/`.
 6. Writes HiDPI resources (`~/.config/i3/Xresources`, `~/.config/i3/scale.env`) and wires them into
-   `~/.xprofile` and `~/.xsessionrc` via a managed block.
+   `~/.xprofile` and `~/.xsessionrc` via a managed block. It also adds `~/.local/bin` to `PATH` through
+   managed blocks in `~/.profile` and `~/.bashrc`.
 7. Makes `~/.config/polybar/launch.sh` executable.
 8. Warns if `~/Pictures/wallpaper.jpg` is missing.
 9. Reports any commands or fonts that are still missing at the end.
@@ -358,6 +359,7 @@ This costs GPU time and is off by default.
 | Lock screen does not appear | check `xss-lock` is running: `pgrep -a xss-lock` |
 | `usermod: command not found` | it is in `passwd` (Debian) / `shadow-utils` (Fedora) / `shadow` (others); use `/usr/sbin/usermod` or add `/usr/sbin` to `PATH` |
 | st text still tiny | the distro `stterm` is being used; run `./install-i3-rice.sh` (without `--no-packages`) to build `~/.local/bin/st`, then check `command -v st` |
+| `st` not found in a new shell | `~/.local/bin` is added by the installer; log out/in or run `source ~/.profile`. i3 and Rofi use the absolute path regardless. |
 | Scaling env vars empty after login | the DM skipped `~/.xprofile`/`~/.xsessionrc`; source `~/.config/i3/scale.env` from your session startup, or start i3 via a wrapper that sources it |
 
 ---
