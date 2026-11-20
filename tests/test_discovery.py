@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 import pytest
 
@@ -44,3 +45,7 @@ def test_read_config_reports_unreadable_content_and_size(tmp_path):
         read_config(path, max_bytes=4)
     with pytest.raises(FileNotFoundError):
         read_config(Path(tmp_path / "missing"))
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    with pytest.raises(ValueError, match="regular"):
+        read_config(fifo)

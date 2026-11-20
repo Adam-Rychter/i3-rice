@@ -5,11 +5,16 @@
 The GUI prototype discovers components and provides an in-memory full-file
 editor. For supported i3 configurations, the inner-gap slider and code field
 stay synchronized with the draft. Files that cannot be represented safely
-remain read-only. Nothing is saved or applied; drafts are lost on exit after
-confirmation. A review dialog shows the diff against the original file.
-External file changes are checked when the file is selected or discovery is
-refreshed. The GUI does not install packages or apply desktop changes. The
-existing installer remains separate.
+remain read-only. Draft edits cannot be saved or applied and are lost on exit
+after confirmation. A review dialog shows the diff against the original file.
+The selected file is monitored for external changes: clean drafts reload,
+while pending edits are retained with a warning. The GUI does not install
+packages or apply desktop changes. The existing installer remains separate.
+
+**Back up disk file** saves the last loaded disk version, not an unsaved draft,
+under `$XDG_STATE_HOME/i3-rice/backups` (default
+`~/.local/state/i3-rice/backups`). It retains the latest 20 backups per file.
+The prototype does not yet provide restoration.
 
 For i3 configuration drafts, **Validate i3 draft** uses `i3 -C` when i3 is
 available. Configurations that may include other files or dynamically generate

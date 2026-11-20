@@ -8,6 +8,9 @@ import stat
 from typing import Mapping
 
 
+MAX_CONFIG_BYTES = 1024 * 1024
+
+
 @dataclass(frozen=True)
 class Component:
     key: str
@@ -88,8 +91,11 @@ def discover(home: Path | None = None, environ: Mapping[str, str] | None = None)
     return DesktopStatus(session, desktop, tuple(statuses))
 
 
-def read_config(path: Path, max_bytes: int = 1024 * 1024) -> str:
-    with path.open("rb") as file:
+def read_config(path: Path, max_bytes: int = MAX_CONFIG_BYTES) -> str:
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as file:
+        if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):
+            raise ValueError("Configuration is not a regular file")
         content = file.read(max_bytes + 1)
     if len(content) > max_bytes:
         raise ValueError(f"File exceeds the {max_bytes // 1024} KiB preview limit")

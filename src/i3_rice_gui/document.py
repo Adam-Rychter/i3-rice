@@ -3,9 +3,11 @@
 from dataclasses import dataclass
 import difflib
 import hashlib
+import os
 from pathlib import Path
+import stat
 
-from .discovery import read_config
+from .discovery import MAX_CONFIG_BYTES, read_config
 
 
 class StaleEditError(ValueError):
@@ -54,13 +56,15 @@ class ConfigDocument:
 
     def changed_externally(self) -> bool:
         try:
-            with self.path.open("rb") as file:
-                digest = hashlib.sha256()
-                for chunk in iter(lambda: file.read(65536), b""):
-                    digest.update(chunk)
+            fd = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as file:
+                if not stat.S_ISREG(os.fstat(file.fileno()).st_mode):
+                    return True
+                current = file.read(MAX_CONFIG_BYTES + 1)
         except FileNotFoundError:
             return True
-        return digest.digest() != self.baseline_digest
+        return (len(current) > MAX_CONFIG_BYTES
+                or hashlib.sha256(current).digest() != self.baseline_digest)
 
     def diff(self) -> str:
         lines = difflib.unified_diff(

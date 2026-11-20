@@ -284,6 +284,12 @@ configuration and asset are available for review.
 - **FR-032**: The application MUST support editing recognized settings in
   included configuration files, showing and changing the actual source file
   while preserving content it cannot safely interpret.
+- **FR-033**: Backups MUST be kept in the user's state directory under
+  `i3-rice/backups`, retaining the 20 most recent backups per configuration
+  file.
+- **FR-034**: If the current file differs from the expected version, restore
+  MUST be blocked until the user reviews the conflict and explicitly chooses
+  how to proceed.
 
 ### Key Entities
 

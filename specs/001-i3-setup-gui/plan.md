@@ -265,10 +265,11 @@ and existing project files unchanged during early prototype work.
    external-change blocking. Cover basic values first; add supported includes
    and shared-variable handling with targeted tests.
    Started with in-memory drafts, checked range edits, diffs, external-change
-   detection, full-file draft editing, a synchronized i3 inner-gap slider and
-   code field, a reviewable diff, and asynchronous i3 validation for drafts
-   without includes. Configuration writing, included-file validation, and
-   backups are not enabled yet.
+   monitoring, full-file draft editing, a synchronized i3
+   inner-gap slider and code field, a reviewable diff, and asynchronous i3
+   validation for drafts without includes, and explicit backups of the loaded
+   disk version. Configuration writing, backup restoration, and included-file
+   validation are not enabled yet.
 4. **Component slices**: Add the prototype controls for each listed area,
    including safe disabled states for missing, ambiguous, or unsupported
    configurations. Verify both editing directions and preservation for every
@@ -321,8 +322,10 @@ plan, not a commitment to bypass the umbrella release requirements.
    is available?
 3. Which privilege mechanism is available on the selected VM, and how will its
    permitted apt actions be constrained and tested?
-4. What paths and retention policy should backups and preview transaction data
-   use? How should the user resolve a recovery conflict?
+4. How should the user resolve a recovery conflict, and where should preview
+   transaction data be kept? Configuration backups use the user's state
+   directory, retain the 20 most recent per file, and require conflict review
+   before restoring.
 5. How should the independent watchdog coordinate durable confirmation and
    timeout races, and which desktop changes have a reliable recovery path?
 6. Which validators and reload mechanisms are present for the selected

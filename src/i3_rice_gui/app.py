@@ -3,7 +3,7 @@
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal
+from PySide6.QtCore import QFileSystemWatcher, QObject, QRunnable, QThreadPool, QTimer, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSlider, QSplitter, QVBoxLayout, QWidget,
 )
 
+from .backups import BACKUP_LIMIT, BackupError, BackupResult, BackupStore, default_backup_root
 from .discovery import DesktopStatus, discover
 from .document import ConfigDocument
 from .i3_gaps import MAX_GAP, find_inner_gap, parse_gap_line, replace_gap_value
@@ -65,14 +66,35 @@ class ValidationSignals(QObject):
 
 
 class ValidationTask(QRunnable):
-    def __init__(self, path: Path, text: str) -> None:
+    def __init__(self, path: Path, text: str, revision: int) -> None:
         super().__init__()
         self.path = path
         self.text = text
+        self.revision = revision
         self.signals = ValidationSignals()
 
     def run(self) -> None:
         self.signals.complete.emit(validate_i3(self.text))
+
+
+class BackupSignals(QObject):
+    complete = Signal(object)
+    error = Signal(str)
+
+
+class BackupTask(QRunnable):
+    def __init__(self, document: ConfigDocument) -> None:
+        super().__init__()
+        self.document = document
+        self.signals = BackupSignals()
+
+    def run(self) -> None:
+        try:
+            result = BackupStore().create(self.document)
+        except (BackupError, OSError) as exc:
+            self.signals.error.emit(str(exc))
+        else:
+            self.signals.complete.emit(result)
 
 
 class MainWindow(QMainWindow):
@@ -82,9 +104,18 @@ class MainWindow(QMainWindow):
         self.scanner: Scan | None = None
         self.validation_task: ValidationTask | None = None
         self.validation_result: ValidationResult | None = None
+        self.validation_revision = 0
+        self.backup_task: BackupTask | None = None
         self.documents: dict[Path, ConfigDocument] = {}
         self.snippets: dict[Path, str] = {}
         self.current_path: Path | None = None
+        self.file_watcher = QFileSystemWatcher(self)
+        self.file_watcher.fileChanged.connect(self.schedule_file_check)
+        self.file_watcher.directoryChanged.connect(self.schedule_file_check)
+        self.file_check_timer = QTimer(self)
+        self.file_check_timer.setSingleShot(True)
+        self.file_check_timer.setInterval(150)
+        self.file_check_timer.timeout.connect(self.check_external_change)
         self.setWindowTitle("i3 Rice Studio")
         self.resize(1180, 760)
         self.setMinimumSize(820, 540)
@@ -134,7 +165,7 @@ class MainWindow(QMainWindow):
         self.description.setObjectName("muted")
         content.addWidget(self.description)
         self.notice = QLabel(
-            "Draft-only prototype · Changes stay in memory and cannot be saved or applied."
+            "Draft-only prototype · Edits stay in memory and cannot be saved or applied."
         )
         self.notice.setWordWrap(True)
         self.notice.setObjectName("notice")
@@ -198,6 +229,19 @@ class MainWindow(QMainWindow):
         self.file_status.setWordWrap(True)
         self.file_status.setObjectName("muted")
         editor_layout.addWidget(self.file_status)
+        self.watch_status = QLabel("")
+        self.watch_status.setWordWrap(True)
+        self.watch_status.setObjectName("muted")
+        editor_layout.addWidget(self.watch_status)
+        self.backup_status = QLabel("Backups contain the disk file, not unsaved drafts.")
+        self.backup_status.setWordWrap(True)
+        self.backup_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.backup_status.setObjectName("muted")
+        editor_layout.addWidget(self.backup_status)
+        self.backup_button = QPushButton("Back up disk file")
+        self.backup_button.setEnabled(False)
+        self.backup_button.clicked.connect(self.start_backup)
+        editor_layout.addWidget(self.backup_button)
         self.validation_status = QLabel("Draft not validated.")
         self.validation_status.setWordWrap(True)
         self.validation_status.setTextFormat(Qt.TextFormat.PlainText)
@@ -252,7 +296,7 @@ class MainWindow(QMainWindow):
         self.status = result
         self.session.setText(f"{result.session.upper()}  ·  {result.desktop.upper()}")
         self.notice.setText(
-            "Draft-only prototype · Changes stay in memory and cannot be saved or applied."
+            "Draft-only prototype · Edits stay in memory and cannot be saved or applied."
         )
         self.navigation.blockSignals(True)
         self.navigation.clear()
@@ -287,6 +331,8 @@ class MainWindow(QMainWindow):
         data = self.config_select.currentData()
         self.current_path = None
         self.invalidate_validation()
+        self.watch_file(None)
+        self.backup_button.setEnabled(False)
         self.set_editor_content("")
         self.editor.setReadOnly(True)
         self.editor_help.setText("Full-file draft")
@@ -320,6 +366,8 @@ class MainWindow(QMainWindow):
             return
         self.current_path = path
         self.reload_button.setEnabled(True)
+        self.backup_button.setEnabled(self.backup_task is None)
+        self.watch_file(path)
         self.show_draft()
         self.update_file_status(changed)
         if reload_error:
@@ -327,6 +375,67 @@ class MainWindow(QMainWindow):
         if self.status and self.status.components[self.navigation.currentRow()].component.key == "i3":
             self.update_gap()
         self.update_validation_controls()
+
+    def watch_file(self, path: Path | None) -> None:
+        self.file_check_timer.stop()
+        watched = self.file_watcher.files() + self.file_watcher.directories()
+        if watched:
+            self.file_watcher.removePaths(watched)
+        self.watch_status.setText("")
+        if path is None:
+            return
+        directory = str(path.parent)
+        failed = []
+        if not self.file_watcher.addPath(directory):
+            failed.append("directory")
+        if path.exists() and not self.file_watcher.addPath(str(path)):
+            failed.append("file")
+        if failed:
+            self.watch_status.setText(
+                f"Automatic monitoring unavailable for {', '.join(failed)}; use refresh."
+            )
+        elif not path.exists():
+            self.watch_status.setText("File missing; monitoring its directory for changes.")
+        else:
+            self.watch_status.setText("Monitoring for external changes.")
+        self.file_check_timer.start()
+
+    def schedule_file_check(self, _path: str) -> None:
+        self.file_check_timer.start()
+
+    def check_external_change(self) -> None:
+        if self.current_path is None:
+            return
+        path = self.current_path
+        document = self.documents[path]
+        try:
+            changed = document.changed_externally()
+        except OSError as exc:
+            self.file_status.setText(f"Unable to check external changes: {exc}")
+            return
+        if changed:
+            self.invalidate_validation()
+            if document.is_dirty or path in self.snippets:
+                self.update_file_status(True)
+            else:
+                try:
+                    replacement = ConfigDocument.open(path)
+                except (OSError, ValueError) as exc:
+                    self.file_status.setText(
+                        f"External change detected; unable to reload: {exc}"
+                    )
+                else:
+                    self.documents[path] = replacement
+                    self.show_config()
+                    return
+        if path.exists():
+            if str(path) not in self.file_watcher.files():
+                if not self.file_watcher.addPath(str(path)):
+                    self.watch_status.setText("Automatic file monitoring unavailable; use refresh.")
+                elif str(path.parent) in self.file_watcher.directories():
+                    self.watch_status.setText("Monitoring for external changes.")
+        elif str(path.parent) in self.file_watcher.directories():
+            self.watch_status.setText("File missing; monitoring its directory for changes.")
 
     def set_editor_content(self, text: str) -> None:
         self.editor.blockSignals(True)
@@ -486,6 +595,7 @@ class MainWindow(QMainWindow):
         )
 
     def invalidate_validation(self) -> None:
+        self.validation_revision += 1
         self.validation_result = None
         self.validation_status.setText("Draft not validated.")
         self.update_validation_controls()
@@ -494,7 +604,9 @@ class MainWindow(QMainWindow):
         if not self.validate_button.isEnabled() or self.current_path is None:
             return
         document = self.documents[self.current_path]
-        self.validation_task = ValidationTask(self.current_path, document.draft)
+        self.validation_task = ValidationTask(
+            self.current_path, document.draft, self.validation_revision
+        )
         self.validation_task.signals.complete.connect(self.finish_validation)
         self.validation_result = None
         self.validation_status.setText("Validating draft…")
@@ -505,6 +617,7 @@ class MainWindow(QMainWindow):
         task = self.validation_task
         self.validation_task = None
         if (task is not None and task.path == self.current_path
+                and task.revision == self.validation_revision
                 and task.path in self.documents
                 and self.documents[task.path].draft == task.text
                 and task.path not in self.snippets and self.is_i3_selected()):
@@ -536,6 +649,38 @@ class MainWindow(QMainWindow):
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         dialog.exec()
+
+    def start_backup(self) -> None:
+        if self.current_path is None or self.backup_task is not None:
+            return
+        path = self.current_path
+        answer = QMessageBox.question(
+            self, "Back up disk file?",
+            f"Back up {path} to {default_backup_root()}?\n\n"
+            f"Unsaved drafts are not included. Only the {BACKUP_LIMIT} most recent "
+            "backups per file are retained.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.backup_task = BackupTask(self.documents[path])
+        self.backup_task.signals.complete.connect(self.finish_backup)
+        self.backup_task.signals.error.connect(self.backup_failed)
+        self.backup_status.setText(f"Backing up {path}…")
+        self.backup_button.setEnabled(False)
+        QThreadPool.globalInstance().start(self.backup_task)
+
+    def finish_backup(self, result: BackupResult) -> None:
+        self.backup_task = None
+        self.backup_button.setEnabled(self.current_path is not None)
+        self.backup_status.setText(
+            f"Backup {result.record.identifier} created for {result.record.source}. "
+            f"Older backups removed: {len(result.pruned)}."
+        )
+
+    def backup_failed(self, message: str) -> None:
+        self.backup_task = None
+        self.backup_button.setEnabled(self.current_path is not None)
+        self.backup_status.setText(f"Backup failed: {message}")
 
     def reload_document(self) -> None:
         if self.current_path is None:
@@ -592,6 +737,10 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def closeEvent(self, event) -> None:
+        if self.backup_task is not None:
+            self.backup_status.setText("Wait for the backup to finish before closing.")
+            event.ignore()
+            return
         if self.snippets or any(document.is_dirty for document in self.documents.values()):
             answer = QMessageBox.question(
                 self, "Discard drafts?",

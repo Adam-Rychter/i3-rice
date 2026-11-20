@@ -47,6 +47,8 @@ def test_external_change_and_deletion_are_detected_without_losing_draft(tmp_path
     assert document.draft == "draft\n"
     path.write_bytes(b"\xff")
     assert document.changed_externally()
+    path.write_bytes(b"a" * (1024 * 1024 + 1))
+    assert document.changed_externally()
     path.unlink()
     assert document.changed_externally()
     assert document.draft == "draft\n"

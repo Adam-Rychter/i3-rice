@@ -6,6 +6,7 @@ import pytest
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPlainTextEdit
 
 from i3_rice_gui import app
+from i3_rice_gui.backups import BackupStore
 from i3_rice_gui.discovery import discover
 from i3_rice_gui.validation import ValidationResult, ValidationStatus
 
@@ -202,6 +203,91 @@ def test_external_change_reloads_when_no_draft_exists(tmp_path, monkeypatch):
     window.close()
 
 
+def test_monitoring_reloads_clean_files_and_preserves_drafts_on_atomic_replace(tmp_path, monkeypatch):
+    config = tmp_path / ".config/i3/config"
+    config.parent.mkdir(parents=True)
+    config.write_text("gaps inner 5\n")
+    desktop = discover(tmp_path, {"PATH": "", "DISPLAY": ":1"})
+    monkeypatch.setattr(app, "discover", lambda: desktop)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
+    qt_app = QApplication.instance() or QApplication([])
+    window = app.MainWindow()
+
+    def wait_for(predicate):
+        deadline = time.monotonic() + 5
+        while not predicate() and time.monotonic() < deadline:
+            qt_app.processEvents()
+            time.sleep(0.01)
+        assert predicate()
+
+    wait_for(lambda: window.status is not None)
+    assert str(config) in window.file_watcher.files()
+    config.write_text("gaps inner 10\n")
+    wait_for(lambda: window.gap_slider.value() == 10)
+    assert not window.documents[config].is_dirty
+
+    window.gap_slider.setValue(20)
+    replacement = config.with_name("replacement")
+    replacement.write_text("gaps inner 30\n")
+    replacement.replace(config)
+    wait_for(lambda: "changed externally" in window.file_status.text())
+    assert window.documents[config].draft == "gaps inner 20\n"
+    assert config.read_text() == "gaps inner 30\n"
+    wait_for(lambda: str(config) in window.file_watcher.files())
+
+    revision = window.validation_revision
+    config.write_text("gaps inner 40\n")
+    wait_for(lambda: window.validation_revision > revision)
+    assert window.documents[config].draft == "gaps inner 20\n"
+    assert config.read_text() == "gaps inner 40\n"
+    window.close()
+
+
+def test_monitoring_preserves_clean_baseline_when_file_is_deleted(tmp_path, monkeypatch):
+    config = tmp_path / ".config/i3/config"
+    config.parent.mkdir(parents=True)
+    config.write_text("gaps inner 5\n")
+    desktop = discover(tmp_path, {"PATH": "", "DISPLAY": ":1"})
+    monkeypatch.setattr(app, "discover", lambda: desktop)
+    qt_app = QApplication.instance() or QApplication([])
+    window = app.MainWindow()
+
+    def wait_for(predicate):
+        deadline = time.monotonic() + 5
+        while not predicate() and time.monotonic() < deadline:
+            qt_app.processEvents()
+            time.sleep(0.01)
+        assert predicate()
+
+    wait_for(lambda: window.status is not None)
+    config.unlink()
+    wait_for(lambda: "unable to reload" in window.file_status.text())
+    assert window.documents[config].draft == "gaps inner 5\n"
+    assert "File missing" in window.watch_status.text()
+    config.write_text("gaps inner 11\n")
+    wait_for(lambda: window.gap_slider.value() == 11)
+    assert window.documents[config].draft == "gaps inner 11\n"
+    window.close()
+
+
+def test_monitoring_failure_is_visible(tmp_path, monkeypatch):
+    config = tmp_path / ".config/i3/config"
+    config.parent.mkdir(parents=True)
+    config.write_text("gaps inner 5\n")
+    desktop = discover(tmp_path, {"PATH": "", "DISPLAY": ":1"})
+    monkeypatch.setattr(app, "discover", lambda: desktop)
+    qt_app = QApplication.instance() or QApplication([])
+    window = app.MainWindow()
+    deadline = time.monotonic() + 5
+    while window.status is None and time.monotonic() < deadline:
+        qt_app.processEvents()
+        time.sleep(0.01)
+    monkeypatch.setattr(window.file_watcher, "addPath", lambda path: False)
+    window.watch_file(config)
+    assert "monitoring unavailable" in window.watch_status.text()
+    window.close()
+
+
 def test_validation_results_are_invalidated_and_stale_results_are_rejected(tmp_path, monkeypatch):
     config = tmp_path / ".config/i3/config"
     config.parent.mkdir(parents=True)
@@ -284,4 +370,44 @@ def test_gui_validation_uses_real_i3_on_the_draft(tmp_path, monkeypatch):
         time.sleep(0.01)
     assert window.validation_result.status == ValidationStatus.INVALID
     assert config.read_text() == "gaps inner 5\n"
+    window.close()
+
+
+def test_backup_button_saves_disk_baseline_without_saving_draft(tmp_path, monkeypatch):
+    config = tmp_path / ".config/i3/config"
+    config.parent.mkdir(parents=True)
+    config.write_text("gaps inner 5\n")
+    desktop = discover(tmp_path, {"PATH": "", "DISPLAY": ":1"})
+    store = BackupStore(tmp_path / "backups")
+    monkeypatch.setattr(app, "discover", lambda: desktop)
+    monkeypatch.setattr(app, "BackupStore", lambda: store)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
+    qt_app = QApplication.instance() or QApplication([])
+    window = app.MainWindow()
+    deadline = time.monotonic() + 5
+    while window.status is None and time.monotonic() < deadline:
+        qt_app.processEvents()
+        time.sleep(0.01)
+
+    window.gap_slider.setValue(20)
+    window.start_backup()
+    deadline = time.monotonic() + 5
+    while window.backup_task is not None and time.monotonic() < deadline:
+        qt_app.processEvents()
+        time.sleep(0.01)
+    assert "created" in window.backup_status.text()
+    record = store.list(config)[0]
+    assert store.read(record) == b"gaps inner 5\n"
+    assert window.documents[config].draft == "gaps inner 20\n"
+    assert config.read_text() == "gaps inner 5\n"
+
+    config.write_text("external change\n")
+    window.start_backup()
+    deadline = time.monotonic() + 5
+    while window.backup_task is not None and time.monotonic() < deadline:
+        qt_app.processEvents()
+        time.sleep(0.01)
+    assert "changed externally" in window.backup_status.text()
+    assert len(store.list(config)) == 1
+    assert config.read_text() == "external change\n"
     window.close()
