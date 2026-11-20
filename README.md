@@ -2,12 +2,19 @@
 
 ## GUI prototype
 
-The GUI prototype discovers components and inspects configurations. For
-supported i3 configurations, its inner-gap slider and code field edit an
-in-memory draft only; nothing is saved or applied. Drafts are lost on exit
-after confirmation. External file changes are checked when the file is selected
-or discovery is refreshed. The GUI does not install packages or apply desktop
-changes. The existing installer remains separate.
+The GUI prototype discovers components and provides an in-memory full-file
+editor. For supported i3 configurations, the inner-gap slider and code field
+stay synchronized with the draft. Files that cannot be represented safely
+remain read-only. Nothing is saved or applied; drafts are lost on exit after
+confirmation. A review dialog shows the diff against the original file.
+External file changes are checked when the file is selected or discovery is
+refreshed. The GUI does not install packages or apply desktop changes. The
+existing installer remains separate.
+
+For i3 configuration drafts, **Validate i3 draft** uses `i3 -C` when i3 is
+available. Configurations that may include other files or dynamically generate
+directives are reported as unavailable for validation. A validation result
+applies only to the exact draft that was checked.
 
 On a graphical Linux desktop with Python 3.11 or newer and Python's `venv`
 module installed:
@@ -16,6 +23,13 @@ module installed:
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 .venv/bin/i3-rice-gui
+```
+
+To try draft editing without an existing i3 configuration, use the bundled
+sample instead:
+
+```sh
+XDG_CONFIG_HOME="$PWD/tests/fixtures" .venv/bin/i3-rice-gui
 ```
 
 For development, install the test dependencies with

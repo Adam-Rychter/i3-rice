@@ -1,14 +1,21 @@
+from pathlib import Path
+
 import pytest
 
 from i3_rice_gui.i3_gaps import find_inner_gap, parse_gap_line, replace_gap_value
 
 
+def test_demo_config_exposes_an_editable_gap():
+    path = Path(__file__).parent / "fixtures/i3/config"
+    assert find_inner_gap(path.read_text()).value == 10
+
+
 def test_finds_literal_and_preserves_formatting():
-    text = "# setup\r\n  gaps  inner  12  # padding\r\nother line\r\n"
+    text = "# setup\r\n  gaps  inner  12  \r\nother line\r\n"
     setting = find_inner_gap(text)
     assert setting.value == 12
     assert text[setting.start:setting.end] == setting.line
-    assert replace_gap_value(setting.line, 8) == "  gaps  inner  8  # padding"
+    assert replace_gap_value(setting.line, 8) == "  gaps  inner  8  "
 
 
 @pytest.mark.parametrize("text", [
@@ -17,6 +24,7 @@ def test_finds_literal_and_preserves_formatting():
     "gaps inner 3\ninclude ~/.config/i3/extra\n",
     "mode resize {\n gaps inner 3\n}\n",
     "gaps inner 201\n",
+    "gaps inner 10 # inline comments are not accepted by i3\n",
 ])
 def test_ambiguous_or_unsupported_config_is_not_editable(text):
     with pytest.raises(ValueError):

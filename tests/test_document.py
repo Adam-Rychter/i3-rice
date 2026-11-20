@@ -61,3 +61,18 @@ def test_diff_shows_missing_final_newlines(tmp_path):
     diff = document.diff()
     assert "-before\n\\ No newline at end of file\n" in diff
     assert "+after\n\\ No newline at end of file\n" in diff
+
+
+def test_editor_refuses_unrepresentable_text_and_preserves_crlf(tmp_path):
+    path = tmp_path / "config"
+    path.write_bytes(b"first\r\nsecond\r\n")
+    document = ConfigDocument.open(path)
+    assert document.editor_text() == "first\nsecond\n"
+    document.set_editor_text("first\nchanged\n")
+    assert document.draft == "first\r\nchanged\r\n"
+    document.draft = "first\r\nsecond\n"
+    with pytest.raises(ValueError, match="line endings"):
+        document.editor_text()
+    document.draft = "first\u2029second"
+    with pytest.raises(ValueError, match="cannot preserve"):
+        document.editor_text()

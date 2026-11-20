@@ -6,14 +6,15 @@ import sys
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QSlider, QSplitter,
-    QVBoxLayout, QWidget,
+    QApplication, QComboBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
+    QLabel, QLineEdit, QListWidget, QMainWindow, QMessageBox, QPlainTextEdit,
+    QPushButton, QSlider, QSplitter, QVBoxLayout, QWidget,
 )
 
 from .discovery import DesktopStatus, discover
 from .document import ConfigDocument
 from .i3_gaps import MAX_GAP, find_inner_gap, parse_gap_line, replace_gap_value
+from .validation import ValidationResult, ValidationStatus, validate_i3
 
 
 STYLE = """
@@ -59,11 +60,28 @@ class Scan(QRunnable):
             self.signals.complete.emit(result)
 
 
+class ValidationSignals(QObject):
+    complete = Signal(object)
+
+
+class ValidationTask(QRunnable):
+    def __init__(self, path: Path, text: str) -> None:
+        super().__init__()
+        self.path = path
+        self.text = text
+        self.signals = ValidationSignals()
+
+    def run(self) -> None:
+        self.signals.complete.emit(validate_i3(self.text))
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.status: DesktopStatus | None = None
         self.scanner: Scan | None = None
+        self.validation_task: ValidationTask | None = None
+        self.validation_result: ValidationResult | None = None
         self.documents: dict[Path, ConfigDocument] = {}
         self.snippets: dict[Path, str] = {}
         self.current_path: Path | None = None
@@ -163,9 +181,10 @@ class MainWindow(QMainWindow):
         title = QLabel("Configuration")
         title.setObjectName("section")
         editor_layout.addWidget(title)
-        editor_help = QLabel("Full-file draft · read-only")
-        editor_help.setObjectName("muted")
-        editor_layout.addWidget(editor_help)
+        self.editor_help = QLabel("Full-file draft")
+        self.editor_help.setObjectName("muted")
+        self.editor_help.setWordWrap(True)
+        editor_layout.addWidget(self.editor_help)
         self.config_select = QComboBox()
         self.config_select.currentIndexChanged.connect(self.show_config)
         editor_layout.addWidget(self.config_select)
@@ -173,11 +192,31 @@ class MainWindow(QMainWindow):
         self.editor.setReadOnly(True)
         self.editor.setFont(QFont("monospace", 10))
         self.editor.setPlaceholderText("Select an existing configuration file.")
+        self.editor.textChanged.connect(self.edit_full_file)
         editor_layout.addWidget(self.editor, 1)
         self.file_status = QLabel("No configuration selected.")
         self.file_status.setWordWrap(True)
         self.file_status.setObjectName("muted")
         editor_layout.addWidget(self.file_status)
+        self.validation_status = QLabel("Draft not validated.")
+        self.validation_status.setWordWrap(True)
+        self.validation_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.validation_status.setObjectName("muted")
+        editor_layout.addWidget(self.validation_status)
+        validation_actions = QHBoxLayout()
+        self.validate_button = QPushButton("Validate i3 draft")
+        self.validate_button.setEnabled(False)
+        self.validate_button.clicked.connect(self.start_validation)
+        validation_actions.addWidget(self.validate_button)
+        self.validation_details = QPushButton("Validation details")
+        self.validation_details.setEnabled(False)
+        self.validation_details.clicked.connect(self.show_validation_details)
+        validation_actions.addWidget(self.validation_details)
+        editor_layout.addLayout(validation_actions)
+        self.review_button = QPushButton("Review draft changes")
+        self.review_button.setEnabled(False)
+        self.review_button.clicked.connect(self.review_document)
+        editor_layout.addWidget(self.review_button)
         self.reload_button = QPushButton("Reload file / discard draft")
         self.reload_button.setEnabled(False)
         self.reload_button.clicked.connect(self.reload_document)
@@ -246,15 +285,19 @@ class MainWindow(QMainWindow):
 
     def show_config(self) -> None:
         data = self.config_select.currentData()
-        self.editor.clear()
         self.current_path = None
+        self.invalidate_validation()
+        self.set_editor_content("")
+        self.editor.setReadOnly(True)
+        self.editor_help.setText("Full-file draft")
         self.reload_button.setEnabled(False)
+        self.review_button.setEnabled(False)
         self.clear_gap("Select an i3 configuration to edit its inner gap.")
         if not data:
             return
         path, status = data
         if status != "Found" and path not in self.documents:
-            self.editor.setPlainText(f"Configuration unavailable: {status}")
+            self.set_editor_content(f"Configuration unavailable: {status}")
             self.file_status.setText(f"Configuration unavailable: {status}")
             return
         reload_error = None
@@ -272,17 +315,56 @@ class MainWindow(QMainWindow):
                     self.documents[path] = document = replacement
                     changed = False
         except (OSError, ValueError) as exc:
-            self.editor.setPlainText(f"Unable to read configuration: {exc}")
+            self.set_editor_content(f"Unable to read configuration: {exc}")
             self.file_status.setText(f"Unable to inspect configuration: {exc}")
             return
         self.current_path = path
         self.reload_button.setEnabled(True)
-        self.editor.setPlainText(document.draft)
+        self.show_draft()
         self.update_file_status(changed)
         if reload_error:
             self.file_status.setText(f"External change detected; unable to reload: {reload_error}")
         if self.status and self.status.components[self.navigation.currentRow()].component.key == "i3":
             self.update_gap()
+        self.update_validation_controls()
+
+    def set_editor_content(self, text: str) -> None:
+        self.editor.blockSignals(True)
+        self.editor.setPlainText(text)
+        self.editor.blockSignals(False)
+
+    def show_draft(self) -> None:
+        if self.current_path is None:
+            return
+        document = self.documents[self.current_path]
+        try:
+            text = document.editor_text()
+        except ValueError as exc:
+            self.set_editor_content(document.draft)
+            self.editor.setReadOnly(True)
+            self.editor_help.setText(str(exc))
+            return
+        self.set_editor_content(text)
+        if self.editor.document().toRawText().replace("\u2029", "\n") != text:
+            self.editor.setReadOnly(True)
+            self.editor_help.setText("This file cannot be represented safely in the editor.")
+            return
+        if self.current_path in self.snippets:
+            self.editor.setReadOnly(True)
+            self.editor_help.setText("Correct the invalid snippet before editing the full file.")
+            return
+        self.editor.setReadOnly(False)
+        self.editor_help.setText("Full-file draft · changes stay in memory")
+
+    def edit_full_file(self) -> None:
+        if self.current_path is None or self.editor.isReadOnly():
+            return
+        document = self.documents[self.current_path]
+        document.set_editor_text(self.editor.document().toRawText().replace("\u2029", "\n"))
+        self.invalidate_validation()
+        if self.status and self.status.components[self.navigation.currentRow()].component.key == "i3":
+            self.update_gap()
+        self.update_file_status()
 
     def clear_gap(self, message: str) -> None:
         self.gap_slider.setEnabled(False)
@@ -297,6 +379,9 @@ class MainWindow(QMainWindow):
         if self.current_path is None:
             return
         document = self.documents[self.current_path]
+        self.review_button.setEnabled(
+            document.is_dirty and self.current_path not in self.snippets
+        )
         try:
             changed = document.changed_externally() if changed is None else changed
         except OSError as exc:
@@ -306,7 +391,12 @@ class MainWindow(QMainWindow):
         if changed:
             self.file_status.setText("File changed externally. Draft retained; reload to discard it.")
         elif dirty:
-            self.file_status.setText("Unsaved in-memory draft. The file on disk is unchanged.")
+            if self.current_path in self.snippets:
+                self.file_status.setText(
+                    "Invalid snippet is retained in memory; correct it before reviewing."
+                )
+            else:
+                self.file_status.setText("Unsaved in-memory draft. The file on disk is unchanged.")
         else:
             self.file_status.setText("Original file. No in-memory changes.")
 
@@ -344,6 +434,7 @@ class MainWindow(QMainWindow):
         path = self.current_path
         document = self.documents[path]
         self.snippets[path] = text
+        self.invalidate_validation()
         try:
             parse_gap_line(text)
             setting = find_inner_gap(document.draft)
@@ -354,8 +445,9 @@ class MainWindow(QMainWindow):
             self.setting_help.setText(str(exc))
         else:
             self.snippets.pop(path)
-            self.editor.setPlainText(document.draft)
-            self.update_gap()
+        self.update_validation_controls()
+        self.show_draft()
+        self.update_gap()
         self.update_file_status()
 
     def change_gap(self, value: int) -> None:
@@ -369,9 +461,81 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             self.clear_gap(str(exc))
             return
-        self.editor.setPlainText(document.draft)
+        self.invalidate_validation()
+        self.show_draft()
         self.update_gap()
         self.update_file_status()
+
+    def is_i3_selected(self) -> bool:
+        index = self.navigation.currentRow()
+        return bool(
+            self.status is not None
+            and 0 <= index < len(self.status.components)
+            and self.status.components[index].component.key == "i3"
+        )
+
+    def update_validation_controls(self) -> None:
+        self.validate_button.setEnabled(
+            self.current_path is not None
+            and self.is_i3_selected()
+            and self.current_path not in self.snippets
+            and self.validation_task is None
+        )
+        self.validation_details.setEnabled(
+            self.validation_result is not None and bool(self.validation_result.details)
+        )
+
+    def invalidate_validation(self) -> None:
+        self.validation_result = None
+        self.validation_status.setText("Draft not validated.")
+        self.update_validation_controls()
+
+    def start_validation(self) -> None:
+        if not self.validate_button.isEnabled() or self.current_path is None:
+            return
+        document = self.documents[self.current_path]
+        self.validation_task = ValidationTask(self.current_path, document.draft)
+        self.validation_task.signals.complete.connect(self.finish_validation)
+        self.validation_result = None
+        self.validation_status.setText("Validating draft…")
+        self.update_validation_controls()
+        QThreadPool.globalInstance().start(self.validation_task)
+
+    def finish_validation(self, result: ValidationResult) -> None:
+        task = self.validation_task
+        self.validation_task = None
+        if (task is not None and task.path == self.current_path
+                and task.path in self.documents
+                and self.documents[task.path].draft == task.text
+                and task.path not in self.snippets and self.is_i3_selected()):
+            self.validation_result = result
+            prefix = {
+                ValidationStatus.VALID: "Valid",
+                ValidationStatus.INVALID: "Invalid",
+                ValidationStatus.UNAVAILABLE: "Unavailable",
+            }[result.status]
+            self.validation_status.setText(f"{prefix}: {result.summary}")
+        else:
+            self.validation_result = None
+            self.validation_status.setText("Draft changed or selection moved; validate again.")
+        self.update_validation_controls()
+
+    def show_validation_details(self) -> None:
+        if self.validation_result is None or not self.validation_result.details:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Validation details")
+        dialog.resize(780, 560)
+        layout = QVBoxLayout(dialog)
+        details = QPlainTextEdit()
+        details.setObjectName("validationOutput")
+        details.setReadOnly(True)
+        details.setPlainText(self.validation_result.details)
+        layout.addWidget(details)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
 
     def reload_document(self) -> None:
         if self.current_path is None:
@@ -393,6 +557,39 @@ class MainWindow(QMainWindow):
         self.documents[path] = replacement
         self.snippets.pop(path, None)
         self.show_config()
+
+    def review_document(self) -> None:
+        if self.current_path is None:
+            return
+        path = self.current_path
+        document = self.documents[path]
+        if not document.is_dirty or path in self.snippets:
+            return
+        try:
+            changed = document.changed_externally()
+        except OSError as exc:
+            status = f"Unable to check external changes: {exc}"
+        else:
+            status = ("File changed externally; this diff uses the original baseline."
+                      if changed else "This draft is not saved or applied.")
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Review draft changes")
+        dialog.resize(780, 560)
+        layout = QVBoxLayout(dialog)
+        summary = QLabel(status)
+        summary.setWordWrap(True)
+        summary.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(summary)
+        diff = QPlainTextEdit()
+        diff.setObjectName("draftDiff")
+        diff.setReadOnly(True)
+        diff.setFont(QFont("monospace", 10))
+        diff.setPlainText(document.diff())
+        layout.addWidget(diff)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
 
     def closeEvent(self, event) -> None:
         if self.snippets or any(document.is_dirty for document in self.documents.values()):

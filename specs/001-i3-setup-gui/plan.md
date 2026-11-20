@@ -6,8 +6,8 @@
 made with the user.
 
 **Status**: In progress. The application shell, discovery, and an in-memory
-i3 inner-gap draft are implemented; VM preparation and VM validation remain
-outstanding.
+i3 inner-gap draft are implemented. An exploratory Ubuntu 26.04 VM has been
+tested; validation on the target Ubuntu 24.04 VM remains outstanding.
 
 ## Summary
 
@@ -258,14 +258,17 @@ and existing project files unchanged during early prototype work.
    component navigation, status and error handling. Verify startup in both
    non-i3 and i3 graphical sessions without modifying the desktop.
    The read-only shell and discovery implementation are complete and tested
-   locally offscreen; startup verification in both VM sessions remains open.
+   locally offscreen. The current prototype also launched in an Ubuntu 26.04
+   LXQt/X11 VM session; Ubuntu 24.04 and i3-session verification remain open.
 3. **Editing foundation**: Implement document baselines, narrow preservation
    edits, snippet/full-file synchronization, validation, backup, restore, and
    external-change blocking. Cover basic values first; add supported includes
    and shared-variable handling with targeted tests.
    Started with in-memory drafts, checked range edits, diffs, external-change
-   detection, and a draft-only i3 inner-gap slider and code field. Configuration
-   writing, validation, backups, and full-file editing are not enabled yet.
+   detection, full-file draft editing, a synchronized i3 inner-gap slider and
+   code field, a reviewable diff, and asynchronous i3 validation for drafts
+   without includes. Configuration writing, included-file validation, and
+   backups are not enabled yet.
 4. **Component slices**: Add the prototype controls for each listed area,
    including safe disabled states for missing, ambiguous, or unsupported
    configurations. Verify both editing directions and preservation for every

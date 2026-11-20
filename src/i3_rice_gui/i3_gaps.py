@@ -8,7 +8,7 @@ _GAP_START = re.compile(r"^[ \t]*gaps[ \t]+inner(?:[ \t]|$)")
 _INCLUDE = re.compile(r"^[ \t]*include(?:[ \t]|$)")
 _GAP_LINE = re.compile(
     r"(?P<prefix>[ \t]*gaps[ \t]+inner[ \t]+)"
-    r"(?P<number>[0-9]+)(?P<suffix>[ \t]*(?:#.*)?)"
+    r"(?P<number>[0-9]+)(?P<suffix>[ \t]*)"
 )
 MAX_GAP = 200
 

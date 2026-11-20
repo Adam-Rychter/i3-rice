@@ -39,6 +39,19 @@ class ConfigDocument:
     def discard(self) -> None:
         self.draft = self.baseline
 
+    def editor_text(self) -> str:
+        normalized = self.draft.replace("\r\n", "\n")
+        if "\r" in normalized or ("\r\n" in self.draft and "\n" in
+                                    self.draft.replace("\r\n", "")):
+            raise ValueError("Mixed or unsupported line endings require read-only inspection.")
+        if "\u2029" in normalized:
+            raise ValueError("This file contains a character the editor cannot preserve safely.")
+        return normalized
+
+    def set_editor_text(self, text: str) -> None:
+        newline = "\r\n" if "\r\n" in self.baseline else "\n"
+        self.draft = text.replace("\n", newline)
+
     def changed_externally(self) -> bool:
         try:
             with self.path.open("rb") as file:

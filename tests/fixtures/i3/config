@@ -1,0 +1,10 @@
+# Sample i3 configuration for trying the draft editor.
+set $mod Mod4
+font pango:monospace 10
+
+# Space between windows.
+gaps inner 10
+gaps outer 5
+default_border pixel 2
+
+bindsym $mod+Return exec xterm
