@@ -20,7 +20,14 @@ WALLPAPER_SRC="$SCRIPT_DIR/wallpapers/deepseek-neural-whale-4k.jpg"
 #   ./install-i3-rice.sh --package-manager dnf
 #   ./install-i3-rice.sh --user alice          # add alice to the sudo/wheel group
 #   ./install-i3-rice.sh --no-admin-group      # leave group membership unchanged
+#   ./install-i3-rice.sh --build-from-source   # build the WM stack from source into ~/.local
 #   ./install-i3-rice.sh --help
+#
+# With --build-from-source, the tiling stack (i3, i3lock, xss-lock, polybar,
+# rofi, picom, dunst, feh, slop, maim, xclip, playerctl, pasystray, lxappearance,
+# yad) is cloned from public git and built into ~/.local instead of installed as
+# packages. System-level pieces (PulseAudio, nm-applet, Xorg tools, arandr,
+# libnotify) are still installed from packages, along with the build toolchain.
 #
 # After it finishes, start i3 from your display manager, or run `startx` with
 # `exec i3` in ~/.xinitrc.
@@ -31,6 +38,7 @@ LIST_PACKAGES=0
 PM_OVERRIDE="${I3_RICE_PM:-}"
 TARGET_USER="${I3_RICE_USER:-}"
 SKIP_ADMIN_GROUP=0
+BUILD_FROM_SOURCE=0
 SCALE=200
 
 usage() {
@@ -51,6 +59,7 @@ Usage:
   ./install-i3-rice.sh --package-manager dnf
   ./install-i3-rice.sh --user alice          # add alice to the sudo/wheel group
   ./install-i3-rice.sh --no-admin-group      # leave group membership unchanged
+  ./install-i3-rice.sh --build-from-source   # build the WM stack from source into ~/.local
   ./install-i3-rice.sh --help
 
 After it finishes, start i3 from your display manager, or run `startx` with
@@ -85,6 +94,7 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --no-admin-group) SKIP_ADMIN_GROUP=1 ;;
+    --build-from-source) BUILD_FROM_SOURCE=1 ;;
     -h|--help) usage 0 ;;
     *)
       echo "install-i3-rice: unknown option: $1" >&2
@@ -153,6 +163,13 @@ NERD_FONT_VERSION="3.5.1"
 FONT_FAMILY="JetBrains Mono"
 ST_FONT_FAMILY="JetBrains Mono"
 
+# Source builds (--build-from-source) install under ~/.local; keep it on PATH
+# now so the post-install checks find the freshly built binaries.
+export PATH="$HOME/.local/bin:$PATH"
+
+SOURCE_BUILD_DIR="$HOME/.cache/i3-rice/src"
+SOURCE_PREFIX="$HOME/.local"
+
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
 if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
@@ -198,6 +215,7 @@ declare -A PKG_GROUPS=()
 GROUP_ORDER=(
   wm terminal bar launcher compositor notifications wallpaper screenshot clipboard
   media audio-gui audio-cli network xutils kb xprop display-gui theming fonts notify calendar elevate
+  build-deps
 )
 
 case "$PM" in
@@ -227,6 +245,8 @@ case "$PM" in
     PKG_GROUPS[notify]="libnotify-bin"
     PKG_GROUPS[calendar]="yad"
     PKG_GROUPS[elevate]="sudo passwd"
+    # build-deps: toolchain + -dev headers used by --build-from-source.
+    PKG_GROUPS[build-deps]="build-essential git pkg-config meson ninja-build cmake autoconf automake libtool intltool gettext flex bison gobject-introspection libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxss-dev libxrender-dev libxcomposite-dev libxdamage-dev libxfixes-dev libxmu-dev libxt-dev libxcb1-dev libxcb-util0-dev libxcb-icccm4-dev libxcb-ewmh-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xrm-dev libxcb-cursor-dev libxcb-composite0-dev libxcb-image0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-sync-dev libxcb-damage0-dev libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev libcairo2-dev libpango1.0-dev libglib2.0-dev libimlib2-dev libpixman-1-dev librsvg2-dev libpng-dev libjpeg-dev libexif-dev libgl1-mesa-dev libglew-dev libglm-dev libepoxy-dev libpulse-dev libasound2-dev libavahi-client-dev libdbus-1-dev libdbus-glib-1-dev libpam0g-dev libnotify-dev libyajl-dev libpcre2-dev libstartup-notification0-dev libev-dev libconfuse-dev libconfig-dev uthash-dev libxdg-basedir-dev libjsoncpp-dev libnl-genl-3-dev libcurl4-openssl-dev libgirepository1.0-dev libgtk-3-dev libgtk2.0-dev libappindicator3-dev"
     ;;
   dnf)
     PM_LABEL="dnf (Fedora/RHEL)"
@@ -254,6 +274,8 @@ case "$PM" in
     PKG_GROUPS[notify]="libnotify"
     PKG_GROUPS[calendar]="yad"
     PKG_GROUPS[elevate]="shadow-utils"
+    # build-deps: toolchain + -dev headers used by --build-from-source.
+    PKG_GROUPS[build-deps]="gcc gcc-c++ make git pkgconf-pkg-config meson ninja-build cmake autoconf automake libtool intltool gettext flex bison gobject-introspection-devel libX11-devel libXext-devel libXinerama-devel libXrandr-devel libXScrnSaver-devel libXrender-devel libXcomposite-devel libXdamage-devel libXfixes-devel libXmu-devel libXt-devel libxcb-devel xcb-util-devel xcb-util-keysyms-devel xcb-util-wm-devel xcb-util-cursor-devel xcb-util-image-devel xcb-util-renderutil-devel libxkbcommon-devel libxkbcommon-x11-devel cairo-devel pango-devel glib2-devel imlib2-devel pixman-devel librsvg2-devel libpng-devel libjpeg-turbo-devel libexif-devel mesa-libGL-devel libepoxy-devel glm-devel glew-devel pulseaudio-libs-devel alsa-lib-devel avahi-devel dbus-devel pam-devel libnotify-devel yajl-devel pcre2-devel startup-notification-devel libev-devel libconfuse-devel libconfig-devel uthash-devel libxdg-basedir-devel jsoncpp-devel libnl3-devel libcurl-devel gtk3-devel gtk2-devel libappindicator-gtk3-devel"
     ;;
   pacman)
     PM_LABEL="pacman (Arch/Manjaro)"
@@ -281,6 +303,8 @@ case "$PM" in
     PKG_GROUPS[notify]="libnotify"
     PKG_GROUPS[calendar]="yad"
     PKG_GROUPS[elevate]="shadow"
+    # build-deps: toolchain + -dev headers used by --build-from-source.
+    PKG_GROUPS[build-deps]="base-devel git pkgconf meson ninja cmake autoconf automake libtool intltool flex bison gobject-introspection libx11 libxext libxinerama libxrandr libxss libxrender libxcomposite libxdamage libxfixes libxmu libxt libxcb xcb-util xcb-util-keysyms xcb-util-wm xcb-util-cursor xcb-util-image xcb-util-renderutil libxkbcommon libxkbcommon-x11 cairo pango glib2 imlib2 pixman librsvg libpng libjpeg-turbo libexif mesa libepoxy glm glew libpulse alsa-lib avahi dbus pam libnotify yajl pcre2 startup-notification libev confuse libconfig uthash libxdg-basedir jsoncpp libnl curl gtk3 gtk2 libappindicator-gtk3"
     ;;
   zypper)
     PM_LABEL="zypper (openSUSE)"
@@ -308,6 +332,8 @@ case "$PM" in
     PKG_GROUPS[notify]="libnotify-tools"
     PKG_GROUPS[calendar]="yad"
     PKG_GROUPS[elevate]="shadow"
+    # build-deps: toolchain + -dev headers used by --build-from-source.
+    PKG_GROUPS[build-deps]="gcc gcc-c++ make git pkg-config meson ninja cmake autoconf automake libtool intltool gettext-tools flex bison gobject-introspection-devel libX11-devel libXext-devel libXinerama-devel libXrandr-devel libXss-devel libXrender-devel libXcomposite-devel libXdamage-devel libXfixes-devel libXmu-devel libXt-devel libxcb-devel xcb-util-devel xcb-util-keysyms-devel xcb-util-wm-devel xcb-util-cursor-devel xcb-util-image-devel xcb-util-renderutil-devel libxkbcommon-devel libxkbcommon-x11-devel cairo-devel pango-devel glib2-devel imlib2-devel libpixman-1-0-devel librsvg-devel libpng16-devel libjpeg8-devel libexif-devel Mesa-libGL-devel libepoxy-devel glm-devel glew-devel libpulse-devel alsa-devel avahi-devel dbus-1-devel pam-devel libnotify-devel yajl-devel pcre2-devel startup-notification-devel libev-devel libconfuse-devel libconfig-devel uthash-devel libxdg-basedir-devel jsoncpp-devel libnl3-devel libcurl-devel gtk3-devel gtk2-devel libappindicator3-devel"
     ;;
   apk)
     PM_LABEL="apk (Alpine)"
@@ -335,6 +361,8 @@ case "$PM" in
     PKG_GROUPS[notify]="libnotify"
     PKG_GROUPS[calendar]="yad"
     PKG_GROUPS[elevate]="shadow"
+    # build-deps: toolchain + -dev headers used by --build-from-source.
+    PKG_GROUPS[build-deps]="build-base git pkgconf meson ninja cmake autoconf automake libtool intltool gettext flex bison gobject-introspection-dev libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxscrnsaver-dev libxrender-dev libxcomposite-dev libxdamage-dev libxfixes-dev libxmu-dev libxt-dev libxcb-dev xcb-util-dev xcb-util-keysyms-dev xcb-util-wm-dev xcb-util-cursor-dev xcb-util-image-dev xcb-util-renderutil-dev libxkbcommon-dev cairo-dev pango-dev glib-dev imlib2-dev pixman-dev librsvg-dev libpng-dev libjpeg-turbo-dev libexif-dev mesa-dev libepoxy-dev glm-dev glew-dev pulseaudio-dev alsa-lib-dev avahi-dev dbus-dev linux-pam-dev libnotify-dev yajl-dev pcre2-dev startup-notification-dev libev-dev confuse-dev libconfig-dev uthash-dev libxdg-basedir-dev jsoncpp-dev libnl3-dev curl-dev gtk+3.0-dev gtk+2.0-dev libappindicator-dev"
     ;;
   none) ;;
 esac
@@ -345,9 +373,18 @@ case "$PM" in
   *) ADMIN_GROUP="" ;;
 esac
 
+# Programs built from source under --build-from-source. Their binary packages are
+# left out of the package install; the 'build-deps' group provides the toolchain
+# and -dev headers they compile against.
+SOURCE_BINS="i3 i3-wm i3wm i3lock xss-lock polybar rofi picom dunst feh maim xclip playerctl pasystray lxappearance yad"
+
 PACKAGES=()
 for group in "${GROUP_ORDER[@]}"; do
+  [ "$group" = "build-deps" ] && [ "$BUILD_FROM_SOURCE" != 1 ] && continue
   for pkg in ${PKG_GROUPS[$group]:-}; do
+    if [ "$BUILD_FROM_SOURCE" = 1 ] && [[ " $SOURCE_BINS " == *" $pkg "* ]]; then
+      continue
+    fi
     PACKAGES+=("$pkg")
   done
 done
@@ -356,6 +393,11 @@ if [ "$LIST_PACKAGES" = 1 ]; then
   echo "distro:  $DISTRO"
   echo "manager: $PM_LABEL"
   echo "admin group: ${ADMIN_GROUP:-(none)}"
+  if [ "$BUILD_FROM_SOURCE" = 1 ]; then
+    echo "build from source: yes (the WM stack is compiled into ~/.local instead of installed as binaries)"
+  else
+    echo "build from source: no (add --build-from-source to compile the WM stack from public git)"
+  fi
   for group in "${GROUP_ORDER[@]}"; do
     printf '%-12s %s\n' "$group" "${PKG_GROUPS[$group]:-(none)}"
   done
@@ -862,6 +904,119 @@ install_font() {
   fi
 }
 
+build_one() {
+  local name="$1" repo="$2" ref="$3" type="$4"
+  local dir="$SOURCE_BUILD_DIR/$name"
+  local log="$SOURCE_BUILD_DIR/$name.log"
+
+  if [ "$DRY_RUN" = 1 ]; then
+    log "[dry-run] would clone $repo ($ref) and build $name [$type] into $SOURCE_PREFIX"
+    return 0
+  fi
+
+  log "building $name $ref [$type]"
+
+  if [ -d "$dir/.git" ]; then
+    git -C "$dir" fetch --quiet --depth 1 origin "$ref" 2>/dev/null || true
+    git -C "$dir" checkout --quiet --detach FETCH_HEAD 2>/dev/null || true
+  else
+    rm -rf "$dir"
+    if ! git clone --quiet --depth 1 --branch "$ref" "$repo" "$dir" 2>/dev/null; then
+      if ! git clone --quiet --depth 1 "$repo" "$dir" 2>/dev/null; then
+        warn "clone failed: $name ($repo)"
+        return 1
+      fi
+      git -C "$dir" fetch --quiet --depth 1 origin "$ref" 2>/dev/null || true
+      git -C "$dir" checkout --quiet --detach FETCH_HEAD 2>/dev/null || true
+    fi
+  fi
+
+  local meson_opts=""
+  case "$name" in
+    playerctl) meson_opts="-Dgtk-doc=false" ;;
+  esac
+
+  local rc=0
+  (
+    cd "$dir" || exit 1
+    case "$type" in
+      meson)
+        meson setup build -Dprefix="$SOURCE_PREFIX" $meson_opts --buildtype=release || exit 1
+        meson compile -C build || exit 1
+        meson install -C build || exit 1
+        ;;
+      cmake)
+        cmake -B build -DCMAKE_INSTALL_PREFIX="$SOURCE_PREFIX" -DCMAKE_BUILD_TYPE=Release || exit 1
+        cmake --build build -j"$(nproc)" || exit 1
+        cmake --install build || exit 1
+        ;;
+      autotools)
+        autoreconf -fi || exit 1
+        ./configure --prefix="$SOURCE_PREFIX" || exit 1
+        make -j"$(nproc)" || exit 1
+        make install || exit 1
+        ;;
+      make)
+        make -j"$(nproc)" || exit 1
+        make PREFIX="$SOURCE_PREFIX" install || exit 1
+        ;;
+    esac
+  ) >"$log" 2>&1 || rc=$?
+  if [ $rc -ne 0 ]; then
+    warn "build failed: $name (log: $log)"
+    tail -n 25 "$log" >&2
+    return 1
+  fi
+
+  log "installed $name to $SOURCE_PREFIX"
+}
+
+build_sources() {
+  [ "$BUILD_FROM_SOURCE" = 1 ] || return 0
+
+  if ! command -v git >/dev/null 2>&1; then
+    warn "git not found; cannot build from source (install git, or drop --no-packages)"
+    return 0
+  fi
+
+  if [ "$DRY_RUN" != 1 ]; then
+    mkdir -p "$SOURCE_BUILD_DIR" "$SOURCE_PREFIX/bin" "$SOURCE_PREFIX/lib" "$SOURCE_PREFIX/share"
+  fi
+
+  export PKG_CONFIG_PATH="$SOURCE_PREFIX/lib/pkgconfig:$SOURCE_PREFIX/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
+  export CMAKE_PREFIX_PATH="$SOURCE_PREFIX"
+  export LD_LIBRARY_PATH="$SOURCE_PREFIX/lib:$SOURCE_PREFIX/lib64:${LD_LIBRARY_PATH:-}"
+  export PATH="$SOURCE_PREFIX/bin:$PATH"
+
+  log "building the WM stack from source into $SOURCE_PREFIX (Tier 1 + Tier 2)"
+
+  local name repo ref type failed=0
+  while read -r name repo ref type; do
+    [ -n "$name" ] || continue
+    build_one "$name" "$repo" "$ref" "$type" || { failed=1; warn "$name was not built from source"; }
+  done <<'SPECS'
+i3 https://github.com/i3/i3.git 4.25.1 meson
+i3lock https://github.com/i3/i3lock.git 2.16 meson
+xss-lock https://bitbucket.org/raymonad/xss-lock.git master make
+polybar https://github.com/polybar/polybar.git 3.7.2 cmake
+rofi https://github.com/davatorium/rofi.git 2.1.1 meson
+picom https://github.com/yshui/picom.git v13 meson
+dunst https://github.com/dunst-project/dunst.git v1.13.2 meson
+feh https://github.com/derf/feh.git 3.13.1 make
+slop https://github.com/naelstrof/slop.git v7.7 cmake
+maim https://github.com/naelstrof/maim.git v5.8.2 cmake
+xclip https://github.com/astrand/xclip.git 0.13 autotools
+playerctl https://github.com/altdesktop/playerctl.git v2.4.1 meson
+pasystray https://github.com/christophgysin/pasystray.git 0.8.2 autotools
+lxappearance https://github.com/lxde/lxappearance.git 0.6.4 autotools
+yad https://github.com/v1cont/yad.git v15.0 autotools
+SPECS
+
+  if [ "$failed" = 1 ]; then
+    warn "one or more programs failed to build; the missing-command check below lists them"
+  fi
+}
+
 if [ "$INSTALL_PACKAGES" = 1 ]; then
   install_packages
   ensure_admin_group
@@ -871,6 +1026,7 @@ fi
 
 install_font
 install_st
+build_sources
 
 # Nerd Font icons for Polybar (left empty when only the standard font is available).
 if [[ "$FONT_FAMILY" == *Nerd* ]]; then

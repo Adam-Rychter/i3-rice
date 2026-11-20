@@ -268,6 +268,7 @@ cd ~/dev/projects/i3-rice
 ./install-i3-rice.sh --list-packages   # see resolved package names
 ./install-i3-rice.sh --dry-run         # inspect, change nothing
 ./install-i3-rice.sh                   # install packages + write configs
+./install-i3-rice.sh --build-from-source   # build the WM stack from source into ~/.local
 ```
 
 Run it as your normal user; it calls `sudo` only for package installation. Running the whole script with
@@ -284,6 +285,7 @@ Useful flags:
 | `--package-manager <pm>` | force `apt`, `dnf`, `pacman`, `zypper`, or `apk` (`I3_RICE_PM` also works) |
 | `--user <name>` | user to add to the admin group (default: `$SUDO_USER`, login name, or `$USER`) |
 | `--no-admin-group` | do not change `sudo`/`wheel` group membership |
+| `--build-from-source` | clone and build the tiling stack from public git into `~/.local` instead of installing binaries |
 | `--help` | usage |
 
 What it changes:
@@ -308,6 +310,53 @@ What it changes:
 11. Reports any commands or fonts that are still missing at the end.
 
 It does **not** change your login session, GTK theme, or display configuration.
+
+---
+
+## Build from source
+
+By default the installer installs every program from the distro's packages. With `--build-from-source` it
+instead clones the tiling stack from public git and builds it into `~/.local`, leaving only the pieces that are
+not sensible to compile yourself — PulseAudio (`pactl`), `nm-applet`/NetworkManager, the Xorg tools (`xrandr`,
+`xset`, `setxkbmap`, `xprop`), `arandr`, and `libnotify` — to the package manager.
+
+```sh
+./install-i3-rice.sh --build-from-source
+```
+
+What gets built from source (pinned versions):
+
+| Program | Version | Source |
+|---|---|---|
+| i3 | 4.25.1 | github.com/i3/i3 |
+| i3lock | 2.16 | github.com/i3/i3lock |
+| xss-lock | master | bitbucket.org/raymonad/xss-lock |
+| polybar | 3.7.2 | github.com/polybar/polybar |
+| rofi | 2.1.1 | github.com/davatorium/rofi |
+| picom | v13 | github.com/yshui/picom |
+| dunst | v1.13.2 | github.com/dunst-project/dunst |
+| feh | 3.13.1 | github.com/derf/feh |
+| slop | v7.7 | github.com/naelstrof/slop (maim dependency) |
+| maim | v5.8.2 | github.com/naelstrof/maim |
+| xclip | 0.13 | github.com/astrand/xclip |
+| playerctl | v2.4.1 | github.com/altdesktop/playerctl |
+| pasystray | 0.8.2 | github.com/christophgysin/pasystray |
+| lxappearance | 0.6.4 | github.com/lxde/lxappearance |
+| yad | v15.0 | github.com/v1cont/yad |
+
+`st` is always built from source (see [Terminal (st)](#terminal-st)), independent of this flag.
+
+Notes:
+
+- The installer installs a `build-deps` package group (compiler, `meson`/`ninja`/`cmake`/autotools, and the
+  `-dev` headers) in place of the runtime binaries, then compiles each program with `--prefix=~/.local`. The
+  builds themselves need no root; only the `build-deps` install elevates with `sudo`.
+- Builds are pinned to the versions above and are fault-tolerant: a failing build logs to
+  `~/.cache/i3-rice/src/<name>.log`, warns, and is reported as missing at the end.
+- The `build-deps` package names are fully mapped only for **apt (Debian/Ubuntu/Mint)**; the dnf/pacman/zypper/apk
+  mappings are best-effort. Prefer `--build-from-source` on Debian-family systems.
+- `~/.local/bin` is already on `PATH` (see [Scaling / HiDPI](#scaling--hidpi)); i3, polybar, etc. are picked up
+  automatically after a re-login.
 
 ---
 

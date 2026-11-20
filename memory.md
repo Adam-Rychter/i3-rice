@@ -133,4 +133,7 @@ Mod = Super.
 - HiDPI defaults to 200% for 4K; change it with `--scale` and log out/in for the GTK/Qt env to apply. Re-run the installer after changing scale so st is rebuilt at the right font size.
 - The Nerd Font is downloaded to `~/.local/share/fonts`; Polybar icons fall back to text if it cannot be installed.
 - Wallpaper is installed to `~/Pictures/wallpaper.jpg` only if that file does not already exist.
+- `--build-from-source` clones and builds the tiling stack (i3, i3lock, xss-lock, polybar, rofi, picom, dunst,
+  feh, slop, maim, xclip, playerctl, pasystray, lxappearance, yad) into `~/.local`; PulseAudio, nm-applet, the
+  Xorg tools, arandr and libnotify stay as packages. The `build-deps` group is mapped fully only for apt.
 - Mint-specific gaps in i3: no Cinnamon panel, no applets, no keyboard layout handling, no automatic display management. The script covers audio keys, nm-applet, lock, calendar, and the tray, but not everything.
