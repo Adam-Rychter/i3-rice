@@ -5,8 +5,9 @@
 **Input**: Umbrella feature specification in `spec.md` and prototype decisions
 made with the user.
 
-**Status**: In progress. A read-only application shell and discovery are
-implemented; VM preparation and VM validation remain outstanding.
+**Status**: In progress. The application shell, discovery, and an in-memory
+i3 inner-gap draft are implemented; VM preparation and VM validation remain
+outstanding.
 
 ## Summary
 
@@ -262,6 +263,9 @@ and existing project files unchanged during early prototype work.
    edits, snippet/full-file synchronization, validation, backup, restore, and
    external-change blocking. Cover basic values first; add supported includes
    and shared-variable handling with targeted tests.
+   Started with in-memory drafts, checked range edits, diffs, external-change
+   detection, and a draft-only i3 inner-gap slider and code field. Configuration
+   writing, validation, backups, and full-file editing are not enabled yet.
 4. **Component slices**: Add the prototype controls for each listed area,
    including safe disabled states for missing, ambiguous, or unsupported
    configurations. Verify both editing directions and preservation for every

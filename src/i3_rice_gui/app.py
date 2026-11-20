@@ -1,16 +1,19 @@
-"""Read-only prototype shell."""
+"""Prototype shell with in-memory configuration drafts."""
 
+from pathlib import Path
 import sys
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QListWidget,
-    QMainWindow, QPlainTextEdit, QPushButton, QSplitter,
+    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QSlider, QSplitter,
     QVBoxLayout, QWidget,
 )
 
-from .discovery import DesktopStatus, discover, read_config
+from .discovery import DesktopStatus, discover
+from .document import ConfigDocument
+from .i3_gaps import MAX_GAP, find_inner_gap, parse_gap_line, replace_gap_value
 
 
 STYLE = """
@@ -61,6 +64,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.status: DesktopStatus | None = None
         self.scanner: Scan | None = None
+        self.documents: dict[Path, ConfigDocument] = {}
+        self.snippets: dict[Path, str] = {}
+        self.current_path: Path | None = None
         self.setWindowTitle("i3 Rice Studio")
         self.resize(1180, 760)
         self.setMinimumSize(820, 540)
@@ -110,7 +116,7 @@ class MainWindow(QMainWindow):
         self.description.setObjectName("muted")
         content.addWidget(self.description)
         self.notice = QLabel(
-            "Read-only prototype · Installation, editing and live preview are not available yet."
+            "Draft-only prototype · Changes stay in memory and cannot be saved or applied."
         )
         self.notice.setWordWrap(True)
         self.notice.setObjectName("notice")
@@ -131,10 +137,23 @@ class MainWindow(QMainWindow):
         settings_title = QLabel("Settings")
         settings_title.setObjectName("section")
         detail_layout.addWidget(settings_title)
-        pending = QLabel("Visual controls are not implemented yet.")
-        pending.setObjectName("muted")
-        pending.setWordWrap(True)
-        detail_layout.addWidget(pending)
+        self.setting_help = QLabel("Select an i3 configuration to edit its inner gap.")
+        self.setting_help.setObjectName("muted")
+        self.setting_help.setWordWrap(True)
+        detail_layout.addWidget(self.setting_help)
+        self.gap_slider = QSlider(Qt.Orientation.Horizontal)
+        self.gap_slider.setRange(0, MAX_GAP)
+        self.gap_slider.setEnabled(False)
+        self.gap_slider.valueChanged.connect(self.change_gap)
+        detail_layout.addWidget(self.gap_slider)
+        self.gap_label = QLabel("Inner gap: unavailable")
+        detail_layout.addWidget(self.gap_label)
+        self.snippet = QLineEdit()
+        self.snippet.setMaxLength(1024 * 1024)
+        self.snippet.setPlaceholderText("Relevant configuration line")
+        self.snippet.setEnabled(False)
+        self.snippet.textEdited.connect(self.edit_snippet)
+        detail_layout.addWidget(self.snippet)
         detail_layout.addStretch()
         splitter.addWidget(self.details)
 
@@ -144,7 +163,7 @@ class MainWindow(QMainWindow):
         title = QLabel("Configuration")
         title.setObjectName("section")
         editor_layout.addWidget(title)
-        editor_help = QLabel("Original file · read-only")
+        editor_help = QLabel("Full-file draft · read-only")
         editor_help.setObjectName("muted")
         editor_layout.addWidget(editor_help)
         self.config_select = QComboBox()
@@ -155,6 +174,14 @@ class MainWindow(QMainWindow):
         self.editor.setFont(QFont("monospace", 10))
         self.editor.setPlaceholderText("Select an existing configuration file.")
         editor_layout.addWidget(self.editor, 1)
+        self.file_status = QLabel("No configuration selected.")
+        self.file_status.setWordWrap(True)
+        self.file_status.setObjectName("muted")
+        editor_layout.addWidget(self.file_status)
+        self.reload_button = QPushButton("Reload file / discard draft")
+        self.reload_button.setEnabled(False)
+        self.reload_button.clicked.connect(self.reload_document)
+        editor_layout.addWidget(self.reload_button)
         splitter.addWidget(editor_card)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
@@ -186,7 +213,7 @@ class MainWindow(QMainWindow):
         self.status = result
         self.session.setText(f"{result.session.upper()}  ·  {result.desktop.upper()}")
         self.notice.setText(
-            "Read-only prototype · Installation, editing and live preview are not available yet."
+            "Draft-only prototype · Changes stay in memory and cannot be saved or applied."
         )
         self.navigation.blockSignals(True)
         self.navigation.clear()
@@ -220,16 +247,163 @@ class MainWindow(QMainWindow):
     def show_config(self) -> None:
         data = self.config_select.currentData()
         self.editor.clear()
+        self.current_path = None
+        self.reload_button.setEnabled(False)
+        self.clear_gap("Select an i3 configuration to edit its inner gap.")
         if not data:
             return
         path, status = data
-        if status != "Found":
+        if status != "Found" and path not in self.documents:
             self.editor.setPlainText(f"Configuration unavailable: {status}")
+            self.file_status.setText(f"Configuration unavailable: {status}")
             return
+        reload_error = None
         try:
-            self.editor.setPlainText(read_config(path))
+            if path not in self.documents:
+                self.documents[path] = ConfigDocument.open(path)
+            document = self.documents[path]
+            changed = document.changed_externally()
+            if changed and not document.is_dirty and path not in self.snippets:
+                try:
+                    replacement = ConfigDocument.open(path)
+                except (OSError, ValueError) as exc:
+                    reload_error = str(exc)
+                else:
+                    self.documents[path] = document = replacement
+                    changed = False
         except (OSError, ValueError) as exc:
             self.editor.setPlainText(f"Unable to read configuration: {exc}")
+            self.file_status.setText(f"Unable to inspect configuration: {exc}")
+            return
+        self.current_path = path
+        self.reload_button.setEnabled(True)
+        self.editor.setPlainText(document.draft)
+        self.update_file_status(changed)
+        if reload_error:
+            self.file_status.setText(f"External change detected; unable to reload: {reload_error}")
+        if self.status and self.status.components[self.navigation.currentRow()].component.key == "i3":
+            self.update_gap()
+
+    def clear_gap(self, message: str) -> None:
+        self.gap_slider.setEnabled(False)
+        self.gap_label.setText("Inner gap: unavailable")
+        self.snippet.blockSignals(True)
+        self.snippet.clear()
+        self.snippet.blockSignals(False)
+        self.snippet.setEnabled(False)
+        self.setting_help.setText(message)
+
+    def update_file_status(self, changed: bool | None = None) -> None:
+        if self.current_path is None:
+            return
+        document = self.documents[self.current_path]
+        try:
+            changed = document.changed_externally() if changed is None else changed
+        except OSError as exc:
+            self.file_status.setText(f"Unable to check external changes: {exc}")
+            return
+        dirty = document.is_dirty or self.current_path in self.snippets
+        if changed:
+            self.file_status.setText("File changed externally. Draft retained; reload to discard it.")
+        elif dirty:
+            self.file_status.setText("Unsaved in-memory draft. The file on disk is unchanged.")
+        else:
+            self.file_status.setText("Original file. No in-memory changes.")
+
+    def update_gap(self) -> None:
+        if self.current_path is None:
+            return
+        document = self.documents[self.current_path]
+        try:
+            setting = find_inner_gap(document.draft)
+        except ValueError as exc:
+            self.clear_gap(str(exc))
+            return
+        snippet = self.snippets.get(self.current_path, setting.line)
+        self.snippet.blockSignals(True)
+        self.snippet.setText(snippet)
+        self.snippet.blockSignals(False)
+        self.snippet.setEnabled(True)
+        try:
+            value = parse_gap_line(snippet)
+        except ValueError as exc:
+            self.gap_slider.setEnabled(False)
+            self.gap_label.setText("Inner gap: invalid draft")
+            self.setting_help.setText(str(exc))
+            return
+        self.gap_slider.blockSignals(True)
+        self.gap_slider.setValue(value)
+        self.gap_slider.blockSignals(False)
+        self.gap_slider.setEnabled(True)
+        self.gap_label.setText(f"Inner gap: {value}px")
+        self.setting_help.setText("Edit the line or move the slider. Changes are draft only.")
+
+    def edit_snippet(self, text: str) -> None:
+        if self.current_path is None:
+            return
+        path = self.current_path
+        document = self.documents[path]
+        self.snippets[path] = text
+        try:
+            parse_gap_line(text)
+            setting = find_inner_gap(document.draft)
+            document.replace(setting.start, setting.end, setting.line, text)
+        except ValueError as exc:
+            self.gap_slider.setEnabled(False)
+            self.gap_label.setText("Inner gap: invalid draft")
+            self.setting_help.setText(str(exc))
+        else:
+            self.snippets.pop(path)
+            self.editor.setPlainText(document.draft)
+            self.update_gap()
+        self.update_file_status()
+
+    def change_gap(self, value: int) -> None:
+        if self.current_path is None:
+            return
+        document = self.documents[self.current_path]
+        try:
+            setting = find_inner_gap(document.draft)
+            replacement = replace_gap_value(setting.line, value)
+            document.replace(setting.start, setting.end, setting.line, replacement)
+        except ValueError as exc:
+            self.clear_gap(str(exc))
+            return
+        self.editor.setPlainText(document.draft)
+        self.update_gap()
+        self.update_file_status()
+
+    def reload_document(self) -> None:
+        if self.current_path is None:
+            return
+        path = self.current_path
+        document = self.documents[path]
+        if document.is_dirty or path in self.snippets:
+            answer = QMessageBox.question(
+                self, "Discard draft?",
+                "Reloading discards this in-memory draft. Continue?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            replacement = ConfigDocument.open(path)
+        except (OSError, ValueError) as exc:
+            self.file_status.setText(f"Unable to reload configuration: {exc}")
+            return
+        self.documents[path] = replacement
+        self.snippets.pop(path, None)
+        self.show_config()
+
+    def closeEvent(self, event) -> None:
+        if self.snippets or any(document.is_dirty for document in self.documents.values()):
+            answer = QMessageBox.question(
+                self, "Discard drafts?",
+                "Closing discards all in-memory drafts. Continue?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+        event.accept()
 
 
 def main() -> int:

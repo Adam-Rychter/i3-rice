@@ -2,9 +2,12 @@
 
 ## GUI prototype
 
-The GUI prototype currently provides **read-only** component discovery and
-configuration inspection. It does not install packages, edit files, or apply
-desktop changes. The existing installer remains separate.
+The GUI prototype discovers components and inspects configurations. For
+supported i3 configurations, its inner-gap slider and code field edit an
+in-memory draft only; nothing is saved or applied. Drafts are lost on exit
+after confirmation. External file changes are checked when the file is selected
+or discovery is refreshed. The GUI does not install packages or apply desktop
+changes. The existing installer remains separate.
 
 On a graphical Linux desktop with Python 3.11 or newer and Python's `venv`
 module installed:
