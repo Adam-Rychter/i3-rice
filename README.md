@@ -1,5 +1,29 @@
 # i3 Rice — Catppuccin Mocha
 
+## GUI prototype
+
+The GUI prototype currently provides **read-only** component discovery and
+configuration inspection. It does not install packages, edit files, or apply
+desktop changes. The existing installer remains separate.
+
+On a graphical Linux desktop with Python 3.11 or newer and Python's `venv`
+module installed:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -e .
+.venv/bin/i3-rice-gui
+```
+
+For development, install the test dependencies with
+`.venv/bin/python -m pip install -e '.[test]'` and run
+`QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest`.
+
+The prototype plan targets Ubuntu 24.04 in a VMware VM for future installation
+and live desktop testing. See [the prototype plan](specs/001-i3-setup-gui/plan.md).
+
+---
+
 A minimal, keyboard-driven tiling desktop for **X11**. It was built for **Linux Mint 22.3 on NVIDIA** as a
 replacement for Cinnamon, but the installer detects the package manager and maps package names for
 Debian/Ubuntu, Fedora, Arch, openSUSE, and Alpine, so it can be tested in VMs on other distributions.
