@@ -14,18 +14,42 @@ class StaleEditError(ValueError):
     """A proposed edit no longer matches the current draft."""
 
 
+def compare_text(before: str, after: str, before_name: str, after_name: str) -> str:
+    lines = difflib.unified_diff(
+        before.splitlines(keepends=True),
+        after.splitlines(keepends=True),
+        fromfile=before_name,
+        tofile=after_name,
+    )
+    return "".join(line if line.endswith("\n") else f"{line}\n\\ No newline at end of file\n"
+                   for line in lines)
+
+
 @dataclass
 class ConfigDocument:
     path: Path
     baseline: str
     draft: str
     baseline_digest: bytes
+    baseline_exists: bool = True
+    editor_newline: str = "\n"
 
     @classmethod
     def open(cls, path: Path) -> "ConfigDocument":
         content = read_config(path)
         digest = hashlib.sha256(content.encode("utf-8")).digest()
-        return cls(path=path, baseline=content, draft=content, baseline_digest=digest)
+        return cls(
+            path=path, baseline=content, draft=content, baseline_digest=digest,
+            editor_newline="\r\n" if "\r\n" in content else "\n",
+        )
+
+    @classmethod
+    def for_missing(cls, path: Path) -> "ConfigDocument":
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return cls(path, "", "", hashlib.sha256(b"").digest(), baseline_exists=False)
+        raise FileExistsError(f"Configuration appeared while reviewing backups: {path}")
 
     @property
     def is_dirty(self) -> bool:
@@ -40,6 +64,11 @@ class ConfigDocument:
 
     def discard(self) -> None:
         self.draft = self.baseline
+        self.editor_newline = "\r\n" if "\r\n" in self.baseline else "\n"
+
+    def load_draft(self, text: str) -> None:
+        self.draft = text
+        self.editor_newline = "\r\n" if "\r\n" in text else "\n"
 
     def editor_text(self) -> str:
         normalized = self.draft.replace("\r\n", "\n")
@@ -51,8 +80,7 @@ class ConfigDocument:
         return normalized
 
     def set_editor_text(self, text: str) -> None:
-        newline = "\r\n" if "\r\n" in self.baseline else "\n"
-        self.draft = text.replace("\n", newline)
+        self.draft = text.replace("\n", self.editor_newline)
 
     def changed_externally(self) -> bool:
         try:
@@ -62,16 +90,20 @@ class ConfigDocument:
                     return True
                 current = file.read(MAX_CONFIG_BYTES + 1)
         except FileNotFoundError:
+            if self.baseline_exists:
+                return True
+            try:
+                self.path.lstat()
+            except FileNotFoundError:
+                return False
+            return True
+        if not self.baseline_exists:
             return True
         return (len(current) > MAX_CONFIG_BYTES
                 or hashlib.sha256(current).digest() != self.baseline_digest)
 
     def diff(self) -> str:
-        lines = difflib.unified_diff(
-            self.baseline.splitlines(keepends=True),
-            self.draft.splitlines(keepends=True),
-            fromfile=f"{self.path} (original)",
-            tofile=f"{self.path} (draft)",
+        return compare_text(
+            self.baseline, self.draft,
+            f"{self.path} (original)", f"{self.path} (draft)",
         )
-        return "".join(line if line.endswith("\n") else f"{line}\n\\ No newline at end of file\n"
-                       for line in lines)

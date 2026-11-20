@@ -3,9 +3,21 @@
 ## GUI prototype
 
 The GUI prototype discovers components and provides an in-memory full-file
-editor. For supported i3 configurations, the inner-gap slider and code field
-stay synchronized with the draft. Files that cannot be represented safely
-remain read-only. Draft edits cannot be saved or applied and are lost on exit
+editor. For supported i3 configurations, inner gaps (0–200 px), outer gaps
+(-200–200 px), and pixel borders (0–20 px) have synchronized sliders and code
+fields. Unsupported, ambiguous, or out-of-range settings remain editable in
+the full-file draft instead. Polybar also has a 1–200 px height control for
+a literal `[bar/main]` height, identifying sections that inherit it. Includes,
+height references, complex inheritance, and unsupported syntax disable this
+control rather than guessing. Picom's literal global corner radius (0–100 px)
+and shadow radius (1–100 px) are also editable; included configurations and
+per-window overrides disable the affected control. Dunst's quoted six-digit
+frame colors in the global and urgency sections have individual color pickers;
+other rules or drop-in files can override them. The bundled Rofi theme can be
+selected separately to edit its literal window radius (0–100 px); imports,
+dynamic scopes, and ambiguous window selectors require manual editing. Other
+theme files can override the selected file. Files that cannot be represented
+safely remain read-only. Draft edits cannot be saved or applied and are lost on exit
 after confirmation. A review dialog shows the diff against the original file.
 The selected file is monitored for external changes: clean drafts reload,
 while pending edits are retained with a warning. The GUI does not install
@@ -14,7 +26,10 @@ packages or apply desktop changes. The existing installer remains separate.
 **Back up disk file** saves the last loaded disk version, not an unsaved draft,
 under `$XDG_STATE_HOME/i3-rice/backups` (default
 `~/.local/state/i3-rice/backups`). It retains the latest 20 backups per file.
-The prototype does not yet provide restoration.
+**Review backups** compares a backup with the current draft and can load it
+into memory after confirmation, including when the original file is missing.
+It does not restore or overwrite the disk file; disk restoration is not
+implemented yet.
 
 For i3 configuration drafts, **Validate i3 draft** uses `i3 -C` when i3 is
 available. Configurations that may include other files or dynamically generate

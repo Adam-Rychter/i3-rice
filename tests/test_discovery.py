@@ -26,6 +26,10 @@ def test_discovery_uses_xdg_config_and_reports_executable_and_missing_files(tmp_
         (i3_config, "Found"), (tmp_path / ".i3/config", "Not found")
     )
     assert result.components[2].executables == (("polybar", None),)
+    assert result.components[3].configs == (
+        (config / "rofi/config.rasi", "Not found"),
+        (config / "rofi/catppuccin-mocha.rasi", "Not found"),
+    )
     assert i3_config.read_text() == "# existing config\n"
 
 

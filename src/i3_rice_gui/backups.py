@@ -1,5 +1,7 @@
 """Private, bounded backups of configuration files."""
 
+from __future__ import annotations
+
 from contextlib import contextmanager
 from dataclasses import dataclass
 import base64
@@ -45,6 +47,12 @@ class BackupResult:
     pruned: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class BackupVersion:
+    record: BackupRecord
+    text: str
+
+
 def default_backup_root() -> Path:
     state = Path(os.environ.get("XDG_STATE_HOME", ""))
     if not state.is_absolute():
@@ -52,12 +60,16 @@ def default_backup_root() -> Path:
     return state / "i3-rice/backups"
 
 
-def _private_directory(path: Path) -> None:
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+def _check_private_directory(path: Path) -> None:
     info = path.lstat()
     if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
             or stat.S_IMODE(info.st_mode) & 0o077):
         raise BackupError(f"Backup directory must be private and owned by the current user: {path}")
+
+
+def _private_directory(path: Path) -> None:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _check_private_directory(path)
 
 
 def _write_private(path: Path, data: bytes) -> None:
@@ -80,11 +92,22 @@ class BackupStore:
         return self.root / hashlib.sha256(os.fsencode(absolute)).hexdigest()
 
     @contextmanager
-    def _locked_bucket(self, source: Path):
-        _private_directory(self.root)
+    def _locked_bucket(self, source: Path, create: bool = True):
         bucket = self._bucket(source)
-        _private_directory(bucket)
-        fd = os.open(bucket / ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        if create:
+            _private_directory(self.root)
+            _private_directory(bucket)
+        else:
+            try:
+                _check_private_directory(self.root)
+                _check_private_directory(bucket)
+            except FileNotFoundError:
+                yield None
+                return
+        flags = os.O_RDWR | os.O_NOFOLLOW
+        if create:
+            flags |= os.O_CREAT
+        fd = os.open(bucket / ".lock", flags, 0o600)
         try:
             with os.fdopen(fd, "r+b") as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
@@ -138,17 +161,41 @@ class BackupStore:
         return sorted(records, key=lambda record: (record.created_ns, record.identifier), reverse=True)
 
     def list(self, source: Path) -> list[BackupRecord]:
-        with self._locked_bucket(source) as bucket:
+        with self._locked_bucket(source, create=False) as bucket:
+            if bucket is None:
+                return []
             return self._list(bucket, source)
 
     def read(self, record: BackupRecord) -> bytes:
-        with self._locked_bucket(record.source) as bucket:
+        if not _IDENTIFIER.fullmatch(record.identifier):
+            raise BackupError("Invalid backup identifier.")
+        with self._locked_bucket(record.source, create=False) as bucket:
+            if bucket is None:
+                raise BackupError("The selected backup no longer exists.")
             current, content = self._read_record(bucket / record.identifier, record.source)
             if current != record:
                 raise BackupError("Backup metadata changed since it was selected.")
             return content
 
+    def versions(self, source: Path) -> list[BackupVersion]:
+        with self._locked_bucket(source, create=False) as bucket:
+            if bucket is None:
+                return []
+            versions = []
+            for record in self._list(bucket, source):
+                current, content = self._read_record(bucket / record.identifier, source)
+                if current != record:
+                    raise BackupError("Backup metadata changed while loading.")
+                try:
+                    text = content.decode("utf-8")
+                except UnicodeError as exc:
+                    raise BackupError(f"Backup is not valid UTF-8: {record.identifier}") from exc
+                versions.append(BackupVersion(record, text))
+            return versions
+
     def create(self, document: ConfigDocument) -> BackupResult:
+        if not document.baseline_exists:
+            raise BackupConflict("No original configuration exists to back up.")
         try:
             fd = os.open(document.path, os.O_RDONLY | os.O_NONBLOCK)
             with os.fdopen(fd, "rb") as file:

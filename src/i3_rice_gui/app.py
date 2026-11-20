@@ -1,20 +1,40 @@
 """Prototype shell with in-memory configuration drafts."""
 
+from functools import partial
 from pathlib import Path
 import sys
 
 from PySide6.QtCore import QFileSystemWatcher, QObject, QRunnable, QThreadPool, QTimer, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
+    QApplication, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QMainWindow, QMessageBox, QPlainTextEdit,
-    QPushButton, QSlider, QSplitter, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QSlider, QSplitter, QVBoxLayout, QWidget,
 )
 
-from .backups import BACKUP_LIMIT, BackupError, BackupResult, BackupStore, default_backup_root
-from .discovery import DesktopStatus, discover
+from .backup_browser import BackupBrowser
+from .backups import (
+    BACKUP_LIMIT, BackupError, BackupResult, BackupStore, BackupVersion, default_backup_root,
+)
+from .discovery import DesktopStatus, config_status, discover
 from .document import ConfigDocument
-from .i3_gaps import MAX_GAP, find_inner_gap, parse_gap_line, replace_gap_value
+from .dunst_colors import ColorSection, find_color, parse_color_line, replace_color_value
+from .i3_appearance import (
+    SettingKind, find_setting, parse_setting_line, replace_setting_value,
+    setting_definition,
+)
+from .picom_radii import (
+    MAX_RADIUS, RadiusKind, find_radius, minimum_radius, parse_radius_line,
+    replace_radius_value,
+)
+from .polybar_height import (
+    MAX_HEIGHT, MIN_HEIGHT, find_height, parse_height_line, replace_height_value,
+)
+from .rofi_radius import (
+    MAX_RADIUS as MAX_ROFI_RADIUS, find_radius as find_rofi_radius,
+    parse_radius_line as parse_rofi_radius_line, replace_radius_value as replace_rofi_radius_value,
+)
+from .settings import ColorSetting, NumericSetting
 from .validation import ValidationResult, ValidationStatus, validate_i3
 
 
@@ -39,7 +59,147 @@ QComboBox { background: #313244; border: 1px solid #45475a; border-radius: 6px; 
 QPlainTextEdit { background: #181825; border: 1px solid #45475a; border-radius: 7px;
                  selection-background-color: #585b70; }
 QSplitter::handle { background: #1e1e2e; width: 10px; }
+QScrollArea { border: none; background: transparent; }
 """
+
+
+def numeric_settings() -> dict[str, NumericSetting]:
+    settings: dict[str, NumericSetting] = {}
+    kinds: tuple[SettingKind, ...] = ("inner", "outer", "pixel_border")
+    for kind in kinds:
+        definition = setting_definition(kind)
+        settings[kind] = NumericSetting(
+            "i3", definition.label, definition.minimum, definition.maximum,
+            partial(find_setting, kind=kind), partial(parse_setting_line, kind=kind),
+            partial(replace_setting_value, kind=kind),
+        )
+    settings["bar_height"] = NumericSetting(
+        "polybar", "Main bar height", MIN_HEIGHT, MAX_HEIGHT,
+        find_height, parse_height_line, replace_height_value,
+    )
+    settings["rofi_window_radius"] = NumericSetting(
+        "rofi", "Window radius", 0, MAX_ROFI_RADIUS,
+        find_rofi_radius, parse_rofi_radius_line, replace_rofi_radius_value,
+    )
+    radii: tuple[RadiusKind, ...] = ("corner-radius", "shadow-radius")
+    for radius in radii:
+        settings[f"picom_{radius}"] = NumericSetting(
+            "picom", radius.replace("-", " ").capitalize(), minimum_radius(radius), MAX_RADIUS,
+            partial(find_radius, kind=radius), partial(parse_radius_line, kind=radius),
+            partial(replace_radius_value, kind=radius),
+        )
+    return settings
+
+
+def color_settings() -> dict[str, ColorSetting]:
+    sections: tuple[ColorSection, ...] = (
+        "global", "urgency_low", "urgency_normal", "urgency_critical",
+    )
+    return {
+        f"dunst_{section}": ColorSetting(
+            "dunst", f"Frame color [{section}]", partial(find_color, section=section),
+            parse_color_line, replace_color_value,
+        )
+        for section in sections
+    }
+
+
+class AppearanceControl(QWidget):
+    def __init__(self, definition: NumericSetting) -> None:
+        super().__init__()
+        self.definition = definition
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.label = QLabel(f"{self.definition.label}: unavailable")
+        layout.addWidget(self.label)
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setAccessibleName(self.definition.label)
+        self.slider.setRange(self.definition.minimum, self.definition.maximum)
+        self.slider.setToolTip(
+            f"Range: {self.definition.minimum} to {self.definition.maximum} px"
+        )
+        self.slider.setEnabled(False)
+        layout.addWidget(self.slider)
+        self.snippet = QLineEdit()
+        self.snippet.setMaxLength(1024 * 1024)
+        self.snippet.setAccessibleName(f"{self.definition.label} configuration")
+        self.snippet.setPlaceholderText("Relevant configuration line")
+        self.snippet.setEnabled(False)
+        layout.addWidget(self.snippet)
+        self.help = QLabel("Select a configuration.")
+        self.help.setObjectName("muted")
+        self.help.setWordWrap(True)
+        layout.addWidget(self.help)
+
+    def clear(self, message: str) -> None:
+        self.disable_value()
+        self.label.setText(f"{self.definition.label}: unavailable")
+        self.snippet.blockSignals(True)
+        self.snippet.clear()
+        self.snippet.blockSignals(False)
+        self.snippet.setEnabled(False)
+        self.help.setText(message)
+
+    def disable_value(self) -> None:
+        self.slider.setEnabled(False)
+
+    def show_value(self, value: int | str, context: str) -> None:
+        if not isinstance(value, int):
+            raise TypeError("Numeric control requires an integer")
+        self.slider.blockSignals(True)
+        self.slider.setValue(value)
+        self.slider.blockSignals(False)
+        self.slider.setEnabled(True)
+        self.label.setText(f"{self.definition.label}: {value}px")
+        self.help.setText(
+            f"Range: {self.definition.minimum} to {self.definition.maximum}px. "
+            f"Edit the line or move the slider; changes are draft only. {context}"
+        )
+
+
+class ColorControl(QWidget):
+    def __init__(self, definition: ColorSetting) -> None:
+        super().__init__()
+        self.definition = definition
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.label = QLabel(f"{definition.label}: unavailable")
+        layout.addWidget(self.label)
+        self.button = QPushButton("Choose color")
+        self.button.setAccessibleName(definition.label)
+        self.button.setEnabled(False)
+        layout.addWidget(self.button)
+        self.snippet = QLineEdit()
+        self.snippet.setMaxLength(1024 * 1024)
+        self.snippet.setAccessibleName(f"{definition.label} configuration")
+        self.snippet.setPlaceholderText("Relevant configuration line")
+        self.snippet.setEnabled(False)
+        layout.addWidget(self.snippet)
+        self.help = QLabel("Select a configuration.")
+        self.help.setObjectName("muted")
+        self.help.setWordWrap(True)
+        layout.addWidget(self.help)
+
+    def disable_value(self) -> None:
+        self.button.setEnabled(False)
+        self.button.setStyleSheet("")
+
+    def clear(self, message: str) -> None:
+        self.disable_value()
+        self.label.setText(f"{self.definition.label}: unavailable")
+        self.snippet.blockSignals(True)
+        self.snippet.clear()
+        self.snippet.blockSignals(False)
+        self.snippet.setEnabled(False)
+        self.help.setText(message)
+
+    def show_value(self, value: int | str, context: str) -> None:
+        if not isinstance(value, str):
+            raise TypeError("Color control requires a string")
+        self.label.setText(f"{self.definition.label}: {value}")
+        self.button.setStyleSheet(f"QPushButton {{ border: 3px solid {value}; }}")
+        self.button.setEnabled(True)
+        self.help.setText(f"Edit the line or choose a color; changes are draft only. {context}")
 
 
 class ScanSignals(QObject):
@@ -97,6 +257,21 @@ class BackupTask(QRunnable):
             self.signals.complete.emit(result)
 
 
+class BrowseBackupsTask(QRunnable):
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self.path = path
+        self.signals = BackupSignals()
+
+    def run(self) -> None:
+        try:
+            versions = BackupStore().versions(self.path)
+        except (BackupError, OSError) as exc:
+            self.signals.error.emit(str(exc))
+        else:
+            self.signals.complete.emit(versions)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -106,8 +281,10 @@ class MainWindow(QMainWindow):
         self.validation_result: ValidationResult | None = None
         self.validation_revision = 0
         self.backup_task: BackupTask | None = None
+        self.browse_task: BrowseBackupsTask | None = None
         self.documents: dict[Path, ConfigDocument] = {}
-        self.snippets: dict[Path, str] = {}
+        self.snippets: dict[Path, dict[str, str]] = {}
+        self.staged_backups: set[Path] = set()
         self.current_path: Path | None = None
         self.file_watcher = QFileSystemWatcher(self)
         self.file_watcher.fileChanged.connect(self.schedule_file_check)
@@ -186,25 +363,38 @@ class MainWindow(QMainWindow):
         settings_title = QLabel("Settings")
         settings_title.setObjectName("section")
         detail_layout.addWidget(settings_title)
-        self.setting_help = QLabel("Select an i3 configuration to edit its inner gap.")
-        self.setting_help.setObjectName("muted")
-        self.setting_help.setWordWrap(True)
-        detail_layout.addWidget(self.setting_help)
-        self.gap_slider = QSlider(Qt.Orientation.Horizontal)
-        self.gap_slider.setRange(0, MAX_GAP)
-        self.gap_slider.setEnabled(False)
-        self.gap_slider.valueChanged.connect(self.change_gap)
-        detail_layout.addWidget(self.gap_slider)
-        self.gap_label = QLabel("Inner gap: unavailable")
-        detail_layout.addWidget(self.gap_label)
-        self.snippet = QLineEdit()
-        self.snippet.setMaxLength(1024 * 1024)
-        self.snippet.setPlaceholderText("Relevant configuration line")
-        self.snippet.setEnabled(False)
-        self.snippet.textEdited.connect(self.edit_snippet)
-        detail_layout.addWidget(self.snippet)
+        self.no_controls = QLabel("No guided controls are available for this component yet.")
+        self.no_controls.setObjectName("muted")
+        self.no_controls.setWordWrap(True)
+        detail_layout.addWidget(self.no_controls)
+        self.appearance_controls: dict[str, AppearanceControl] = {}
+        for kind, definition in numeric_settings().items():
+            control = AppearanceControl(definition)
+            control.slider.valueChanged.connect(
+                lambda value, name=kind: self.change_setting(name, value)
+            )
+            control.snippet.textEdited.connect(
+                lambda text, name=kind: self.edit_snippet(name, text)
+            )
+            self.appearance_controls[kind] = control
+            detail_layout.addWidget(control)
+        self.color_controls: dict[str, ColorControl] = {}
+        for kind, definition in color_settings().items():
+            control = ColorControl(definition)
+            control.button.clicked.connect(lambda _checked=False, name=kind: self.choose_color(name))
+            control.snippet.textEdited.connect(
+                lambda text, name=kind: self.edit_snippet(name, text)
+            )
+            self.color_controls[kind] = control
+            detail_layout.addWidget(control)
+        self.setting_controls: dict[str, AppearanceControl | ColorControl] = {
+            **self.appearance_controls, **self.color_controls,
+        }
         detail_layout.addStretch()
-        splitter.addWidget(self.details)
+        detail_scroll = QScrollArea()
+        detail_scroll.setWidgetResizable(True)
+        detail_scroll.setWidget(self.details)
+        splitter.addWidget(detail_scroll)
 
         editor_card = self.make_card()
         editor_layout = QVBoxLayout(editor_card)
@@ -242,6 +432,10 @@ class MainWindow(QMainWindow):
         self.backup_button.setEnabled(False)
         self.backup_button.clicked.connect(self.start_backup)
         editor_layout.addWidget(self.backup_button)
+        self.browse_button = QPushButton("Review backups")
+        self.browse_button.setEnabled(False)
+        self.browse_button.clicked.connect(self.start_browsing_backups)
+        editor_layout.addWidget(self.browse_button)
         self.validation_status = QLabel("Draft not validated.")
         self.validation_status.setWordWrap(True)
         self.validation_status.setTextFormat(Qt.TextFormat.PlainText)
@@ -333,18 +527,33 @@ class MainWindow(QMainWindow):
         self.invalidate_validation()
         self.watch_file(None)
         self.backup_button.setEnabled(False)
+        self.browse_button.setEnabled(False)
         self.set_editor_content("")
         self.editor.setReadOnly(True)
         self.editor_help.setText("Full-file draft")
         self.reload_button.setEnabled(False)
         self.review_button.setEnabled(False)
-        self.clear_gap("Select an i3 configuration to edit its inner gap.")
+        selected = self.selected_component()
+        self.no_controls.setVisible(
+            not any(control.definition.component == selected
+                    for control in self.setting_controls.values())
+        )
+        for control in self.setting_controls.values():
+            control.clear("Select a configuration.")
+            control.setVisible(control.definition.component == selected)
         if not data:
             return
-        path, status = data
+        path, _ = data
+        status = config_status(path)
+        self.config_select.setItemData(self.config_select.currentIndex(), (path, status))
+        self.config_select.setItemText(self.config_select.currentIndex(), f"{path}  —  {status}")
         if status != "Found" and path not in self.documents:
             self.set_editor_content(f"Configuration unavailable: {status}")
             self.file_status.setText(f"Configuration unavailable: {status}")
+            if status == "Not found":
+                self.current_path = path
+                self.browse_button.setEnabled(self.browse_task is None)
+                self.watch_file(path)
             return
         reload_error = None
         try:
@@ -352,7 +561,7 @@ class MainWindow(QMainWindow):
                 self.documents[path] = ConfigDocument.open(path)
             document = self.documents[path]
             changed = document.changed_externally()
-            if changed and not document.is_dirty and path not in self.snippets:
+            if changed and not self.has_pending_changes(path):
                 try:
                     replacement = ConfigDocument.open(path)
                 except (OSError, ValueError) as exc:
@@ -366,14 +575,14 @@ class MainWindow(QMainWindow):
             return
         self.current_path = path
         self.reload_button.setEnabled(True)
-        self.backup_button.setEnabled(self.backup_task is None)
+        self.backup_button.setEnabled(document.baseline_exists and self.backup_task is None)
+        self.browse_button.setEnabled(self.browse_task is None)
         self.watch_file(path)
         self.show_draft()
         self.update_file_status(changed)
         if reload_error:
             self.file_status.setText(f"External change detected; unable to reload: {reload_error}")
-        if self.status and self.status.components[self.navigation.currentRow()].component.key == "i3":
-            self.update_gap()
+        self.update_appearance()
         self.update_validation_controls()
 
     def watch_file(self, path: Path | None) -> None:
@@ -407,6 +616,10 @@ class MainWindow(QMainWindow):
         if self.current_path is None:
             return
         path = self.current_path
+        if path not in self.documents:
+            if config_status(path) != "Not found":
+                self.show_config()
+            return
         document = self.documents[path]
         try:
             changed = document.changed_externally()
@@ -415,7 +628,7 @@ class MainWindow(QMainWindow):
             return
         if changed:
             self.invalidate_validation()
-            if document.is_dirty or path in self.snippets:
+            if self.has_pending_changes(path):
                 self.update_file_status(True)
             else:
                 try:
@@ -471,18 +684,8 @@ class MainWindow(QMainWindow):
         document = self.documents[self.current_path]
         document.set_editor_text(self.editor.document().toRawText().replace("\u2029", "\n"))
         self.invalidate_validation()
-        if self.status and self.status.components[self.navigation.currentRow()].component.key == "i3":
-            self.update_gap()
+        self.update_appearance()
         self.update_file_status()
-
-    def clear_gap(self, message: str) -> None:
-        self.gap_slider.setEnabled(False)
-        self.gap_label.setText("Inner gap: unavailable")
-        self.snippet.blockSignals(True)
-        self.snippet.clear()
-        self.snippet.blockSignals(False)
-        self.snippet.setEnabled(False)
-        self.setting_help.setText(message)
 
     def update_file_status(self, changed: bool | None = None) -> None:
         if self.current_path is None:
@@ -496,7 +699,7 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             self.file_status.setText(f"Unable to check external changes: {exc}")
             return
-        dirty = document.is_dirty or self.current_path in self.snippets
+        dirty = self.has_pending_changes(self.current_path)
         if changed:
             self.file_status.setText("File changed externally. Draft retained; reload to discard it.")
         elif dirty:
@@ -509,83 +712,133 @@ class MainWindow(QMainWindow):
         else:
             self.file_status.setText("Original file. No in-memory changes.")
 
-    def update_gap(self) -> None:
+    def update_appearance(self) -> None:
         if self.current_path is None:
             return
         document = self.documents[self.current_path]
-        try:
-            setting = find_inner_gap(document.draft)
-        except ValueError as exc:
-            self.clear_gap(str(exc))
-            return
-        snippet = self.snippets.get(self.current_path, setting.line)
-        self.snippet.blockSignals(True)
-        self.snippet.setText(snippet)
-        self.snippet.blockSignals(False)
-        self.snippet.setEnabled(True)
-        try:
-            value = parse_gap_line(snippet)
-        except ValueError as exc:
-            self.gap_slider.setEnabled(False)
-            self.gap_label.setText("Inner gap: invalid draft")
-            self.setting_help.setText(str(exc))
-            return
-        self.gap_slider.blockSignals(True)
-        self.gap_slider.setValue(value)
-        self.gap_slider.blockSignals(False)
-        self.gap_slider.setEnabled(True)
-        self.gap_label.setText(f"Inner gap: {value}px")
-        self.setting_help.setText("Edit the line or move the slider. Changes are draft only.")
+        for kind, control in self.setting_controls.items():
+            if control.definition.component != self.selected_component():
+                continue
+            try:
+                setting = control.definition.find(document.draft)
+            except ValueError as exc:
+                pending = self.snippets.get(self.current_path, {})
+                if kind in pending:
+                    control.snippet.blockSignals(True)
+                    control.snippet.setText(pending[kind])
+                    control.snippet.blockSignals(False)
+                    control.snippet.setEnabled(True)
+                    control.disable_value()
+                    control.label.setText(f"{control.definition.label}: invalid draft")
+                    control.help.setText(str(exc))
+                else:
+                    control.clear(str(exc))
+                continue
+            snippet = self.snippets.get(self.current_path, {}).get(kind, setting.line)
+            control.snippet.blockSignals(True)
+            control.snippet.setText(snippet)
+            control.snippet.blockSignals(False)
+            control.snippet.setEnabled(True)
+            try:
+                value = control.definition.parse(snippet)
+            except ValueError as exc:
+                control.disable_value()
+                control.label.setText(f"{control.definition.label}: invalid draft")
+                control.help.setText(str(exc))
+                continue
+            control.show_value(value, setting.context)
 
-    def edit_snippet(self, text: str) -> None:
+    def edit_snippet(self, kind: str, text: str) -> None:
         if self.current_path is None:
             return
         path = self.current_path
         document = self.documents[path]
-        self.snippets[path] = text
+        self.snippets.setdefault(path, {})[kind] = text
         self.invalidate_validation()
+        definition = self.setting_controls[kind].definition
         try:
-            parse_gap_line(text)
-            setting = find_inner_gap(document.draft)
+            definition.parse(text)
+            setting = definition.find(document.draft)
             document.replace(setting.start, setting.end, setting.line, text)
         except ValueError as exc:
-            self.gap_slider.setEnabled(False)
-            self.gap_label.setText("Inner gap: invalid draft")
-            self.setting_help.setText(str(exc))
+            error = str(exc)
         else:
-            self.snippets.pop(path)
+            error = None
+            del self.snippets[path][kind]
+            if not self.snippets[path]:
+                self.snippets.pop(path)
         self.update_validation_controls()
         self.show_draft()
-        self.update_gap()
+        self.update_appearance()
+        if error is not None:
+            self.setting_controls[kind].help.setText(error)
         self.update_file_status()
 
-    def change_gap(self, value: int) -> None:
+    def change_setting(self, kind: str, value: int) -> None:
         if self.current_path is None:
             return
         document = self.documents[self.current_path]
+        definition = self.appearance_controls[kind].definition
         try:
-            setting = find_inner_gap(document.draft)
-            replacement = replace_gap_value(setting.line, value)
+            setting = definition.find(document.draft)
+            replacement = definition.replace(setting.line, value)
             document.replace(setting.start, setting.end, setting.line, replacement)
         except ValueError as exc:
-            self.clear_gap(str(exc))
+            self.appearance_controls[kind].clear(str(exc))
             return
         self.invalidate_validation()
         self.show_draft()
-        self.update_gap()
+        self.update_appearance()
         self.update_file_status()
 
-    def is_i3_selected(self) -> bool:
+    def choose_color(self, kind: str) -> None:
+        if self.current_path is None:
+            return
+        path = self.current_path
+        document = self.documents[path]
+        control = self.color_controls[kind]
+        if not control.button.isEnabled():
+            return
+        try:
+            setting = control.definition.find(document.draft)
+        except ValueError as exc:
+            control.clear(str(exc))
+            return
+        draft = document.draft
+        pending = dict(self.snippets.get(path, {}))
+        revision = self.validation_revision
+        chosen = QColorDialog.getColor(QColor(setting.value), self, control.definition.label)
+        if not chosen.isValid():
+            return
+        if (self.current_path != path or self.documents.get(path) is not document
+                or document.draft != draft or self.snippets.get(path, {}) != pending
+                or self.validation_revision != revision
+                or self.selected_component() != control.definition.component):
+            self.file_status.setText("The file or draft changed; choose the color again.")
+            return
+        try:
+            replacement = control.definition.replace(setting.line, chosen.name())
+            document.replace(setting.start, setting.end, setting.line, replacement)
+        except ValueError as exc:
+            control.help.setText(str(exc))
+            return
+        self.invalidate_validation()
+        self.show_draft()
+        self.update_appearance()
+        self.update_file_status()
+
+    def selected_component(self) -> str | None:
         index = self.navigation.currentRow()
-        return bool(
-            self.status is not None
-            and 0 <= index < len(self.status.components)
-            and self.status.components[index].component.key == "i3"
-        )
+        if self.status is None or not 0 <= index < len(self.status.components):
+            return None
+        return self.status.components[index].component.key
+
+    def is_i3_selected(self) -> bool:
+        return self.selected_component() == "i3"
 
     def update_validation_controls(self) -> None:
         self.validate_button.setEnabled(
-            self.current_path is not None
+            self.current_path in self.documents
             and self.is_i3_selected()
             and self.current_path not in self.snippets
             and self.validation_task is None
@@ -651,7 +904,9 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def start_backup(self) -> None:
-        if self.current_path is None or self.backup_task is not None:
+        if (self.current_path is None or self.backup_task is not None
+                or self.current_path not in self.documents
+                or not self.documents[self.current_path].baseline_exists):
             return
         path = self.current_path
         answer = QMessageBox.question(
@@ -671,7 +926,7 @@ class MainWindow(QMainWindow):
 
     def finish_backup(self, result: BackupResult) -> None:
         self.backup_task = None
-        self.backup_button.setEnabled(self.current_path is not None)
+        self.update_backup_controls()
         self.backup_status.setText(
             f"Backup {result.record.identifier} created for {result.record.source}. "
             f"Older backups removed: {len(result.pruned)}."
@@ -679,15 +934,104 @@ class MainWindow(QMainWindow):
 
     def backup_failed(self, message: str) -> None:
         self.backup_task = None
-        self.backup_button.setEnabled(self.current_path is not None)
+        self.update_backup_controls()
         self.backup_status.setText(f"Backup failed: {message}")
+
+    def update_backup_controls(self) -> None:
+        self.backup_button.setEnabled(
+            self.current_path in self.documents
+            and self.documents[self.current_path].baseline_exists
+            and self.backup_task is None
+        )
+
+    def start_browsing_backups(self) -> None:
+        if self.current_path is None or self.browse_task is not None:
+            return
+        self.browse_task = BrowseBackupsTask(self.current_path)
+        self.browse_task.signals.complete.connect(self.finish_browsing_backups)
+        self.browse_task.signals.error.connect(self.browse_backups_failed)
+        self.backup_status.setText(f"Loading backups for {self.current_path}…")
+        self.browse_button.setEnabled(False)
+        QThreadPool.globalInstance().start(self.browse_task)
+
+    def finish_browsing_backups(self, versions: list[BackupVersion]) -> None:
+        task = self.browse_task
+        self.browse_task = None
+        self.browse_button.setEnabled(self.current_path is not None)
+        if task is None or task.path != self.current_path:
+            self.backup_status.setText("Selection changed; open backups again.")
+            return
+        path = task.path
+        if not versions:
+            self.backup_status.setText(f"No backups found for {path}.")
+            return
+        original_document = self.documents.get(path)
+        if original_document is None:
+            try:
+                document = ConfigDocument.for_missing(path)
+            except OSError as exc:
+                self.backup_status.setText(f"Unable to review missing configuration: {exc}")
+                return
+        else:
+            document = original_document
+        draft = document.draft
+        snippet = dict(self.snippets.get(path, {}))
+        staged = path in self.staged_backups
+        browser = BackupBrowser(path, draft, versions, bool(snippet), self)
+        self.backup_status.setText(f"Loaded {len(versions)} backups for {path}.")
+        if browser.exec() != QDialog.DialogCode.Accepted:
+            return
+        if (self.current_path != path or self.documents.get(path) is not original_document
+                or document.draft != draft or self.snippets.get(path, {}) != snippet
+                or (path in self.staged_backups) != staged):
+            self.backup_status.setText("The file or draft changed; review backups again.")
+            return
+        try:
+            conflict = document.changed_externally()
+        except OSError as exc:
+            self.backup_status.setText(f"Unable to check external changes: {exc}")
+            return
+        message = "Load this backup into an in-memory draft? No files will be overwritten."
+        if original_document is not None and self.has_pending_changes(path):
+            message += "\n\nThis replaces the pending draft and any invalid snippet."
+        if conflict:
+            message += "\n\nThe disk file changed externally; the conflict remains unresolved."
+        if QMessageBox.question(self, "Load backup as draft?", message) != QMessageBox.StandardButton.Yes:
+            return
+        # A modal confirmation can process file-watcher events before returning.
+        if (self.current_path != path or self.documents.get(path) is not original_document
+                or document.draft != draft or self.snippets.get(path, {}) != snippet
+                or (path in self.staged_backups) != staged):
+            self.backup_status.setText("The file or draft changed; review backups again.")
+            return
+        if original_document is None:
+            try:
+                if document.changed_externally():
+                    self.backup_status.setText("The file appeared; review backups again.")
+                    return
+            except OSError as exc:
+                self.backup_status.setText(f"Unable to check external changes: {exc}")
+                return
+            self.documents[path] = document
+        document.load_draft(browser.selected_version().text)
+        self.snippets.pop(path, None)
+        self.staged_backups.add(path)
+        self.invalidate_validation()
+        self.show_draft()
+        self.update_appearance()
+        self.update_file_status()
+        self.backup_status.setText("Backup loaded as a draft. The disk file was not changed.")
+
+    def browse_backups_failed(self, message: str) -> None:
+        self.browse_task = None
+        self.browse_button.setEnabled(self.current_path is not None)
+        self.backup_status.setText(f"Unable to load backups: {message}")
 
     def reload_document(self) -> None:
         if self.current_path is None:
             return
         path = self.current_path
-        document = self.documents[path]
-        if document.is_dirty or path in self.snippets:
+        if self.has_pending_changes(path):
             answer = QMessageBox.question(
                 self, "Discard draft?",
                 "Reloading discards this in-memory draft. Continue?",
@@ -696,12 +1040,28 @@ class MainWindow(QMainWindow):
                 return
         try:
             replacement = ConfigDocument.open(path)
+        except FileNotFoundError:
+            try:
+                ConfigDocument.for_missing(path)
+            except OSError as exc:
+                self.file_status.setText(f"Unable to reload configuration: {exc}")
+                return
+            self.documents.pop(path)
+            self.snippets.pop(path, None)
+            self.staged_backups.discard(path)
+            self.show_config()
+            return
         except (OSError, ValueError) as exc:
             self.file_status.setText(f"Unable to reload configuration: {exc}")
             return
         self.documents[path] = replacement
         self.snippets.pop(path, None)
+        self.staged_backups.discard(path)
         self.show_config()
+
+    def has_pending_changes(self, path: Path) -> bool:
+        return (self.documents[path].is_dirty or path in self.snippets
+                or path in self.staged_backups)
 
     def review_document(self) -> None:
         if self.current_path is None:
@@ -737,11 +1097,11 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def closeEvent(self, event) -> None:
-        if self.backup_task is not None:
-            self.backup_status.setText("Wait for the backup to finish before closing.")
+        if self.backup_task is not None or self.browse_task is not None:
+            self.backup_status.setText("Wait for the backup operation to finish before closing.")
             event.ignore()
             return
-        if self.snippets or any(document.is_dirty for document in self.documents.values()):
+        if any(self.has_pending_changes(path) for path in self.documents):
             answer = QMessageBox.question(
                 self, "Discard drafts?",
                 "Closing discards all in-memory drafts. Continue?",

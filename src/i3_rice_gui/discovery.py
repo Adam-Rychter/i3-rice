@@ -45,7 +45,7 @@ def components(home: Path, environ: Mapping[str, str]) -> tuple[Component, ...]:
         Component("polybar", "Polybar", "Status bar and modules", ("polybar",),
                   (config_dir / "polybar/config.ini", config_dir / "polybar/config")),
         Component("rofi", "Rofi", "Application launcher", ("rofi",),
-                  (config_dir / "rofi/config.rasi",)),
+                  (config_dir / "rofi/config.rasi", config_dir / "rofi/catppuccin-mocha.rasi")),
         Component("picom", "Picom", "Compositing, shadows and opacity", ("picom",),
                   (config_dir / "picom/picom.conf", config_dir / "picom.conf")),
         Component("dunst", "Dunst", "Desktop notifications", ("dunst",),

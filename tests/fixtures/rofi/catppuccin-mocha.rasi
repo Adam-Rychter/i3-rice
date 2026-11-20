@@ -1,0 +1,15 @@
+/* Sample Rofi theme for draft-only radius editing. */
+* {
+    bg: #1e1e2e;
+    accent: #89b4fa;
+}
+
+window {
+    width: 40%;
+    background-color: @bg;
+    border-radius: 16px;
+}
+
+element {
+    border-radius: 8px;
+}

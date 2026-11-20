@@ -64,7 +64,7 @@ def test_unexpected_failure_and_timeout_are_not_reported_as_invalid(monkeypatch)
 @pytest.mark.skipif(shutil.which("i3") is None, reason="i3 is not installed")
 def test_real_i3_validator_checks_syntax_without_running_exec(tmp_path):
     sentinel = tmp_path / "must-not-exist"
-    valid = f"gaps inner 10\nexec touch {sentinel}\n"
+    valid = f"gaps inner 10\ngaps outer -10\ndefault_border pixel 0\nexec touch {sentinel}\n"
     assert validate_i3(valid).status == ValidationStatus.VALID
     assert not sentinel.exists()
     invalid = validate_i3("gaps inner not-a-number\n")

@@ -5,7 +5,9 @@ import stat
 
 import pytest
 
-from i3_rice_gui.backups import BackupConflict, BackupError, BackupStore, default_backup_root
+from i3_rice_gui.backups import (
+    BackupConflict, BackupError, BackupRecord, BackupStore, default_backup_root,
+)
 from i3_rice_gui.document import ConfigDocument
 
 
@@ -25,6 +27,7 @@ def test_backup_stores_original_privately_not_unsaved_draft(tmp_path):
     assert stat.S_IMODE(bucket.stat().st_mode) == 0o700
     assert stat.S_IMODE(backup.stat().st_mode) == 0o600
     assert store.list(source) == [result.record]
+    assert store.versions(source)[0].text == "gaps inner 5\r\n"
 
 
 def test_changed_source_is_not_backed_up(tmp_path):
@@ -39,6 +42,17 @@ def test_changed_source_is_not_backed_up(tmp_path):
     assert source.read_text() == "external\n"
 
 
+def test_listing_missing_backups_does_not_create_storage(tmp_path):
+    root = tmp_path / "backups"
+    assert BackupStore(root).list(tmp_path / "config") == []
+    assert BackupStore(root).versions(tmp_path / "config") == []
+    assert not root.exists()
+    forged = BackupRecord("../outside", tmp_path / "config", 0, "", 0)
+    with pytest.raises(BackupError, match="identifier"):
+        BackupStore(root).read(forged)
+    assert not root.exists()
+
+
 def test_replaced_non_regular_source_is_rejected_without_blocking(tmp_path):
     source = tmp_path / "config"
     source.write_text("before\n")
@@ -48,6 +62,14 @@ def test_replaced_non_regular_source_is_rejected_without_blocking(tmp_path):
     with pytest.raises(BackupError, match="regular"):
         BackupStore(tmp_path / "backups").create(document)
     assert document.changed_externally()
+
+
+def test_missing_baseline_cannot_backup_new_empty_file(tmp_path):
+    source = tmp_path / "config"
+    document = ConfigDocument.for_missing(source)
+    source.write_text("")
+    with pytest.raises(BackupConflict, match="No original"):
+        BackupStore(tmp_path / "backups").create(document)
 
 
 def test_retention_keeps_most_recent_backups_per_source(tmp_path):

@@ -1,13 +1,15 @@
 # Implementation Plan: i3 Setup and Customization GUI Prototype
 
-**Branch**: Not yet created | **Date**: 2026-11-20 | **Spec**: [spec.md](spec.md)
+**Branch**: `main` | **Date**: 2026-11-20 | **Spec**: [spec.md](spec.md)
 
 **Input**: Umbrella feature specification in `spec.md` and prototype decisions
 made with the user.
 
-**Status**: In progress. The application shell, discovery, and an in-memory
-i3 inner-gap draft are implemented. An exploratory Ubuntu 26.04 VM has been
-tested; validation on the target Ubuntu 24.04 VM remains outstanding.
+**Status**: In progress. The shell, discovery, draft editing, backup review,
+and initial i3, Polybar, Picom, Rofi, and Dunst controls are implemented.
+An Ubuntu 26.04 LXQt/X11 VM has been used for exploratory testing; the target
+Ubuntu 24.04 and i3-session checks remain outstanding. Configuration writes,
+package installation, disk restore, and live preview are not implemented.
 
 ## Summary
 
@@ -249,39 +251,43 @@ and existing project files unchanged during early prototype work.
 
 ## Implementation Milestones
 
-1. **VM and design baseline**: Prepare Ubuntu 24.04 in VMware and create a
+1. **VM and design baseline — in progress**: Prepare Ubuntu 24.04 in VMware and create a
    disposable VM snapshot; inventory component versions, config
    locations, validators, apt packages, authorization, and i3/X11 test access.
    Define representative fixtures and the precise controls feasible for each
-   component.
-2. **Application shell and discovery**: Establish Python/PySide6 project setup,
+   component. An Ubuntu 26.04 exploratory VM and snapshot are available;
+   the target VM and complete inventory are still needed.
+2. **Application shell and discovery — in progress**: Establish Python/PySide6 project setup,
    component navigation, status and error handling. Verify startup in both
    non-i3 and i3 graphical sessions without modifying the desktop.
    The read-only shell and discovery implementation are complete and tested
    locally offscreen. The current prototype also launched in an Ubuntu 26.04
    LXQt/X11 VM session; Ubuntu 24.04 and i3-session verification remain open.
-3. **Editing foundation**: Implement document baselines, narrow preservation
+3. **Editing foundation — in progress**: Implement document baselines, narrow preservation
    edits, snippet/full-file synchronization, validation, backup, restore, and
    external-change blocking. Cover basic values first; add supported includes
    and shared-variable handling with targeted tests.
    Started with in-memory drafts, checked range edits, diffs, external-change
-   monitoring, full-file draft editing, a synchronized i3
-   inner-gap slider and code field, a reviewable diff, and asynchronous i3
-   validation for drafts without includes, and explicit backups of the loaded
-   disk version. Configuration writing, backup restoration, and included-file
-   validation are not enabled yet.
-4. **Component slices**: Add the prototype controls for each listed area,
+   monitoring, full-file draft editing, reviewable diffs, asynchronous i3
+   validation for drafts without includes, explicit backups of the loaded disk
+   version, and backup review/loading into a draft, including a missing original
+   file. Configuration writing, disk restoration, and included-file validation
+   are not enabled yet.
+4. **Component slices — in progress**: Add the prototype controls for each listed area,
    including safe disabled states for missing, ambiguous, or unsupported
-   configurations. Verify both editing directions and preservation for every
-   enabled control. Document controls that remain disabled and why.
-5. **Apt setup**: Add curated package detection, plan review, bounded
+   configurations. Implemented draft-only controls: i3 inner/outer gaps and
+   pixel borders; Polybar main-bar height; Picom corner and shadow radii;
+   Rofi window radius in the project's theme; and Dunst frame colors. These
+   synchronize with their snippets and full-file drafts, and unsupported
+   syntax is disabled. Other candidate controls and shared colors remain open.
+5. **Apt setup — not started**: Add curated package detection, plan review, bounded
    authorization and execution, and honest per-operation results. Exercise
    success and failure cases in the VM; never call the old installer.
-6. **Preview and recovery**: Implement independent timed rollback and
+6. **Preview and recovery — not started**: Implement independent timed rollback and
    confirmation/cancellation for a small verified subset, then add additional
    previewable controls only after their recovery tests pass. Test GUI crash
    and conflict behavior in the VM.
-7. **Integrated demonstration**: In a restored VM snapshot, install a selected
+7. **Integrated demonstration — not started**: In a restored VM snapshot, install a selected
    missing package, inspect every component, edit and validate supported
    settings, preview and revert a change, confirm another, restore a backup,
    and demonstrate an external edit conflict. Record limitations and decide
@@ -290,6 +296,12 @@ and existing project files unchanged during early prototype work.
 Milestones can overlap only after their prerequisites are available; no
 live-preview UI is enabled before milestone 6 safety gates pass. This is a
 plan, not a commitment to bypass the umbrella release requirements.
+
+Latest verification (2026-11-20): local offscreen tests passed, with native
+i3 checks skipped where i3 is unavailable. The exploratory VM passed the full
+suite, including real i3 validation, and exercised the draft controls in its
+LXQt/X11 session. Native validation for Polybar, Picom, Rofi, and Dunst remains
+outstanding; no desktop configuration was applied.
 
 ## Prototype Acceptance and Verification
 

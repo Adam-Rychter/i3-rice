@@ -78,3 +78,29 @@ def test_editor_refuses_unrepresentable_text_and_preserves_crlf(tmp_path):
     document.draft = "first\u2029second"
     with pytest.raises(ValueError, match="cannot preserve"):
         document.editor_text()
+
+
+def test_loaded_draft_preserves_its_own_line_endings(tmp_path):
+    path = tmp_path / "config"
+    path.write_text("original\n")
+    document = ConfigDocument.open(path)
+    document.load_draft("backup\r\nline\r\n")
+    document.set_editor_text("edited\nline\n")
+    assert document.draft == "edited\r\nline\r\n"
+    document.discard()
+    document.set_editor_text("edited\n")
+    assert document.draft == "edited\n"
+
+
+def test_missing_baseline_detects_new_file_or_dangling_symlink(tmp_path):
+    path = tmp_path / "config"
+    document = ConfigDocument.for_missing(path)
+    assert not document.baseline_exists
+    assert not document.changed_externally()
+    path.write_text("")
+    assert document.changed_externally()
+    path.unlink()
+    path.symlink_to(tmp_path / "absent")
+    assert document.changed_externally()
+    with pytest.raises(FileExistsError):
+        ConfigDocument.for_missing(path)
