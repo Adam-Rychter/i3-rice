@@ -1,6 +1,6 @@
 # Tiling WM Rice: Project Memory
 
-Last updated: 2026-11-19
+Last updated: 2026-11-20
 
 ## Goal
 
@@ -16,7 +16,7 @@ Move from a Windows-style desktop (Cinnamon) to a minimal, tiling window manager
 | CPU | AMD Ryzen 5 5600X (12 threads) |
 | GPU | NVIDIA GeForce RTX 3070 Ti, driver 580.178.04 |
 | RAM | 32 GB (about 5.5 GB used at idle on Cinnamon) |
-| Terminal | kitty (already installed at `~/.local/kitty.app`) |
+| Terminal | st 0.9.3, built from source into `~/.local/bin/st` (kitty still installed at `~/.local/kitty.app`) |
 
 ## Workflow
 
@@ -38,6 +38,9 @@ Plan: **one workspace per app**, with tiling used when two apps sit side by side
 - Mint 22.3's repo ships **Sway 1.9-1build2** (wlroots 0.17), which lacks **explicit sync** (added in Sway 1.10 / wlroots 0.18). On Nvidia this can mean flicker or poor frame pacing, mostly in games and sometimes video.
 - The Nvidia driver (580) is new enough. Still to verify: `cat /sys/module/nvidia_drm/parameters/modeset` should print `Y`.
 - No verified Sway PPA for Noble. Building a newer Sway needs a newer wlroots too, and is real work.
+- Debian's packaged **stterm** ignores Xresources for font and colors, so the script builds **st 0.9.3 from source** instead (Catppuccin colors compiled into `config.h`, font size derived from `--scale`).
+- **HiDPI on X11** has no single global fractional-scale switch: fonts follow `Xft.dpi`, GTK widgets scale only by the integer part, and Firefox / VS Code / Steam each need their own setting.
+- **Nerd Font**: the bar, Rofi, and st want glyphs from JetBrainsMono Nerd Font; the installer falls back to standard JetBrains Mono (then `monospace`) if it cannot be fetched.
 
 ## Decision
 
@@ -59,9 +62,9 @@ Sway remains an option for later. It is worth retrying once Mint or Ubuntu ships
 | Screenshots | grim + slurp | maim (+ xclip) |
 | Displays | `output` blocks | xrandr / arandr |
 | GTK theming | nwg-look | lxappearance |
-| Terminal | kitty | kitty |
+| Terminal | kitty | st 0.9.3 (built from source) |
 
-Extras installed: playerctl, pavucontrol, network-manager-gnome (nm-applet), x11-xserver-utils, fonts-jetbrains-mono.
+Extras installed: playerctl, pasystray, pavucontrol, network-manager-gnome (nm-applet), x11-xserver-utils, yad, libnotify-bin, arandr, lxappearance, unzip.
 
 ## What was generated
 
@@ -70,29 +73,36 @@ Extras installed: playerctl, pavucontrol, network-manager-gnome (nm-applet), x11
 - `~/.config/i3/config`
 - `~/.config/polybar/config.ini` and `launch.sh`
 - `~/.config/rofi/config.rasi` and `catppuccin-mocha.rasi`
-- `~/.config/picom/picom.conf` (glx, vsync on, shadows, rounded corners, no blur)
+- `~/.config/picom/picom.conf` (glx, vsync on, shadows, rounded corners, no blur; st at 20% transparency)
 - `~/.config/dunst/dunstrc`
+- `~/.config/i3/Xresources` (Xft.dpi, Xcursor.size)
+- `~/.config/i3/scale.env` (GDK/Qt scaling env)
+- `~/.local/bin/st` (built from source) plus `st.desktop` and the `st-256color` terminfo
+- managed blocks in `~/.xprofile` / `~/.xsessionrc` (scaling) and `~/.profile` / `~/.bashrc` (PATH)
+- wallpaper → `~/Pictures/wallpaper.jpg` (only if it does not already exist)
 
-Palette: **Catppuccin Mocha** (base `#1e1e2e`, text `#cdd6f4`, blue `#89b4fa`, mauve `#cba6f7`, red `#f38ba8`).
+Palette: **Catppuccin Mocha** (base `#1e1e2e`, text `#cdd6f4`, blue `#89b4fa`, mauve `#cba6f7`, red `#f38ba8`). st also gets the full 16-color Mocha palette compiled in.
 
 ## Workspace layout
 
 | Key | Workspace | Assigned class |
 |---|---|---|
-| Super+1 | term | kitty |
+| Super+1 | term | st |
 | Super+2 | code | Code |
 | Super+3 | web | firefox / brave / chrome / chromium |
 | Super+4 | games | steam, steam_app_* |
 | Super+5 | media | vlc |
 
-Steam popups (Friends List, News, Settings), pavucontrol, arandr and lxappearance float.
+Steam popups (Friends List, News, Settings), pavucontrol, arandr, lxappearance, and the yad calendar float.
 
 ## Keybinds
 
 Mod = Super.
 
-- Super+Return: kitty
+- Super+Return: st
 - Super+d: rofi launcher
+- Super+c: calendar popup (yad)
+- Super+a: audio mixer (pavucontrol)
 - Super+Tab: window switcher
 - Super+q: close window
 - Super+h/j/k/l (or arrows): focus. Add Shift to move the window.
@@ -110,14 +120,17 @@ Mod = Super.
 - [ ] Confirm window classes with `xprop WM_CLASS` and fix any `assign` rules that don't match
 - [ ] Set keyboard layout (uncomment the `setxkbmap` line in the i3 config)
 - [ ] Set monitor mode and refresh rate (uncomment the `xrandr` line; get output name from `xrandr`)
-- [ ] Add a wallpaper at `~/Pictures/wallpaper.jpg`
 - [ ] Test a Steam game and a VLC video for tearing or stutter
 - [ ] If tearing: nvidia-settings, X Server Display Configuration, Advanced, Force Full Composition Pipeline
 - [ ] Theme GTK apps with lxappearance (Catppuccin GTK theme and cursor)
-- [ ] Optional later: picom blur, polybar icons via a Nerd Font, retry Sway when 1.10+ is available
+- [ ] Optional later: picom blur, retry Sway when 1.10+ is available
 
 ## Notes
 
 - Fallback: log out and choose the Cinnamon session at any time.
-- Keep the palette hex codes identical across i3, polybar, rofi and dunst. If you switch to Gruvbox or Nord, change all four files.
-- Mint-specific gaps in i3: no Cinnamon panel, no applets, no keyboard layout handling, no automatic display management. The script covers audio keys, nm-applet and lock, but not everything.
+- Keep the palette hex codes identical across i3, polybar, rofi and dunst. If you switch to Gruvbox or Nord, change all four files — and rebuild st, since its palette is compiled into `config.h`.
+- The installer adds the invoking user to the admin group (`sudo` on Debian/Ubuntu/Mint, `wheel` elsewhere); skip with `--no-admin-group`.
+- HiDPI defaults to 200% for 4K; change it with `--scale` and log out/in for the GTK/Qt env to apply. Re-run the installer after changing scale so st is rebuilt at the right font size.
+- The Nerd Font is downloaded to `~/.local/share/fonts`; Polybar icons fall back to text if it cannot be installed.
+- Wallpaper is installed to `~/Pictures/wallpaper.jpg` only if that file does not already exist.
+- Mint-specific gaps in i3: no Cinnamon panel, no applets, no keyboard layout handling, no automatic display management. The script covers audio keys, nm-applet, lock, calendar, and the tray, but not everything.
