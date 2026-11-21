@@ -17,11 +17,14 @@ other rules or drop-in files can override them. The bundled Rofi theme can be
 selected separately to edit its literal window radius (0–100 px); imports,
 dynamic scopes, and ambiguous window selectors require manual editing. Other
 theme files can override the selected file. Files that cannot be represented
-safely remain read-only. Draft edits cannot be saved or applied and are lost on exit
-after confirmation. A review dialog shows the diff against the original file.
+safely remain read-only. Draft edits can be reviewed and applied after
+confirmation; existing files are backed up and written atomically, while
+drafts are still discarded on exit after confirmation. A review dialog shows
+the diff against the original file.
 The selected file is monitored for external changes: clean drafts reload,
 while pending edits are retained with a warning. The GUI does not install
-packages or apply desktop changes. The existing installer remains separate.
+packages or provide live desktop preview yet. The existing installer remains
+separate.
 
 **Back up disk file** saves the last loaded disk version, not an unsaved draft,
 under `$XDG_STATE_HOME/i3-rice/backups` (default
@@ -30,6 +33,11 @@ under `$XDG_STATE_HOME/i3-rice/backups` (default
 into memory after confirmation, including when the original file is missing.
 It does not restore or overwrite the disk file; disk restoration is not
 implemented yet.
+
+**Apply draft to disk** requires a clean external-change check, backs up the
+current file, and atomically writes the reviewed draft. Missing files are
+created with private permissions. i3 drafts must be validated first; when the
+validator is unavailable, the apply confirmation explains that limitation.
 
 For i3 configuration drafts, **Validate i3 draft** uses `i3 -C` when i3 is
 available. Configurations that may include other files or dynamically generate

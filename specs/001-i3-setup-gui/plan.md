@@ -5,8 +5,8 @@
 **Input**: Umbrella feature specification in `spec.md` and prototype decisions
 made with the user.
 
-**Status**: In progress. The shell, discovery, draft editing, backup review,
-and initial i3, Polybar, Picom, Rofi, and Dunst controls are implemented.
+**Status**: In progress. The shell, discovery, draft editing, safe apply,
+backup review, and initial i3, Polybar, Picom, Rofi, and Dunst controls are implemented.
 An Ubuntu 26.04 LXQt/X11 VM has been used for exploratory testing; the target
 Ubuntu 24.04 and i3-session checks remain outstanding. Configuration writes,
 package installation, disk restore, and live preview are not implemented.
@@ -270,12 +270,12 @@ and existing project files unchanged during early prototype work.
    Started with in-memory drafts, checked range edits, diffs, external-change
    monitoring, full-file draft editing, reviewable diffs, asynchronous i3
    validation for drafts without includes, explicit backups of the loaded disk
-   version, and backup review/loading into a draft, including a missing original
-   file. Configuration writing, disk restoration, and included-file validation
-   are not enabled yet.
+   version, backup review/loading into a draft, including a missing original
+   file, and atomic application with conflict checks and automatic backups.
+   Disk restoration and included-file validation are not enabled yet.
 4. **Component slices — in progress**: Add the prototype controls for each listed area,
    including safe disabled states for missing, ambiguous, or unsupported
-   configurations. Implemented draft-only controls: i3 inner/outer gaps and
+   configurations. Implemented controls: i3 inner/outer gaps and
    pixel borders; Polybar main-bar height; Picom corner and shadow radii;
    Rofi window radius in the project's theme; and Dunst frame colors. These
    synchronize with their snippets and full-file drafts, and unsupported

@@ -82,6 +82,12 @@ class ConfigDocument:
     def set_editor_text(self, text: str) -> None:
         self.draft = text.replace("\n", self.editor_newline)
 
+    def mark_applied(self) -> None:
+        self.baseline = self.draft
+        self.baseline_digest = hashlib.sha256(self.baseline.encode("utf-8")).digest()
+        self.baseline_exists = True
+        self.editor_newline = "\r\n" if "\r\n" in self.baseline else "\n"
+
     def changed_externally(self) -> bool:
         try:
             fd = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK)

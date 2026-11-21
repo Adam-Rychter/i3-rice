@@ -36,6 +36,7 @@ from .rofi_radius import (
 )
 from .settings import ColorSetting, NumericSetting
 from .validation import ValidationResult, ValidationStatus, validate_i3
+from .persistence import ApplyError, ApplyResult, apply_document
 
 
 STYLE = """
@@ -257,6 +258,21 @@ class BackupTask(QRunnable):
             self.signals.complete.emit(result)
 
 
+class ApplyTask(QRunnable):
+    def __init__(self, document: ConfigDocument) -> None:
+        super().__init__()
+        self.document = document
+        self.signals = BackupSignals()
+
+    def run(self) -> None:
+        try:
+            result = apply_document(self.document)
+        except (ApplyError, OSError) as exc:
+            self.signals.error.emit(str(exc))
+        else:
+            self.signals.complete.emit(result)
+
+
 class BrowseBackupsTask(QRunnable):
     def __init__(self, path: Path) -> None:
         super().__init__()
@@ -281,6 +297,7 @@ class MainWindow(QMainWindow):
         self.validation_result: ValidationResult | None = None
         self.validation_revision = 0
         self.backup_task: BackupTask | None = None
+        self.apply_task: ApplyTask | None = None
         self.browse_task: BrowseBackupsTask | None = None
         self.documents: dict[Path, ConfigDocument] = {}
         self.snippets: dict[Path, dict[str, str]] = {}
@@ -455,6 +472,10 @@ class MainWindow(QMainWindow):
         self.review_button.setEnabled(False)
         self.review_button.clicked.connect(self.review_document)
         editor_layout.addWidget(self.review_button)
+        self.apply_button = QPushButton("Apply draft to disk")
+        self.apply_button.setEnabled(False)
+        self.apply_button.clicked.connect(self.start_apply)
+        editor_layout.addWidget(self.apply_button)
         self.reload_button = QPushButton("Reload file / discard draft")
         self.reload_button.setEnabled(False)
         self.reload_button.clicked.connect(self.reload_document)
@@ -527,6 +548,7 @@ class MainWindow(QMainWindow):
         self.invalidate_validation()
         self.watch_file(None)
         self.backup_button.setEnabled(False)
+        self.apply_button.setEnabled(False)
         self.browse_button.setEnabled(False)
         self.set_editor_content("")
         self.editor.setReadOnly(True)
@@ -711,6 +733,22 @@ class MainWindow(QMainWindow):
                 self.file_status.setText("Unsaved in-memory draft. The file on disk is unchanged.")
         else:
             self.file_status.setText("Original file. No in-memory changes.")
+        self.update_apply_control(changed)
+
+    def update_apply_control(self, changed: bool | None = None) -> None:
+        if self.current_path is None or self.current_path not in self.documents:
+            self.apply_button.setEnabled(False)
+            return
+        document = self.documents[self.current_path]
+        if changed is None:
+            try:
+                changed = document.changed_externally()
+            except OSError:
+                changed = True
+        self.apply_button.setEnabled(
+            document.is_dirty and not changed and self.current_path not in self.snippets
+            and self.apply_task is None
+        )
 
     def update_appearance(self) -> None:
         if self.current_path is None:
@@ -924,6 +962,72 @@ class MainWindow(QMainWindow):
         self.backup_button.setEnabled(False)
         QThreadPool.globalInstance().start(self.backup_task)
 
+    def start_apply(self) -> None:
+        if (self.current_path is None or self.current_path not in self.documents
+                or self.apply_task is not None):
+            return
+        path = self.current_path
+        document = self.documents[path]
+        if not document.is_dirty or path in self.snippets:
+            return
+        try:
+            changed = document.changed_externally()
+        except OSError as exc:
+            self.file_status.setText(f"Unable to check external changes: {exc}")
+            self.update_apply_control(True)
+            return
+        if changed:
+            self.file_status.setText("File changed externally. Reload before applying.")
+            self.update_apply_control(True)
+            return
+        if self.is_i3_selected():
+            if self.validation_result is None:
+                self.file_status.setText("Validate the i3 draft before applying.")
+                return
+            if self.validation_result.status == ValidationStatus.INVALID:
+                self.file_status.setText("The i3 draft is invalid; fix validation errors before applying.")
+                return
+        validation_note = ""
+        if (self.is_i3_selected() and self.validation_result is not None
+                and self.validation_result.status == ValidationStatus.UNAVAILABLE):
+            validation_note = (
+                "\n\nThe i3 validator is unavailable for this draft. "
+                "Applying it requires explicit confirmation."
+            )
+        answer = QMessageBox.question(
+            self, "Apply draft to disk?",
+            f"This will back up {path} and replace its contents with the reviewed draft."
+            f"{validation_note}",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if self.current_path != path or self.documents.get(path) is not document:
+            self.file_status.setText("Selection changed; review the draft again.")
+            return
+        self.apply_task = ApplyTask(document)
+        self.apply_task.signals.complete.connect(self.finish_apply)
+        self.apply_task.signals.error.connect(self.apply_failed)
+        self.apply_button.setEnabled(False)
+        self.file_status.setText(f"Applying {path}…")
+        QThreadPool.globalInstance().start(self.apply_task)
+
+    def finish_apply(self, result: ApplyResult) -> None:
+        task = self.apply_task
+        self.apply_task = None
+        if task is None or self.documents.get(result.path) is not task.document:
+            self.file_status.setText("Apply completed, but the selected document changed.")
+            return
+        self.staged_backups.discard(result.path)
+        self.invalidate_validation()
+        self.show_config()
+        backup_text = " A backup was created." if result.backup is not None else ""
+        self.file_status.setText(f"Applied {result.path} successfully.{backup_text}")
+
+    def apply_failed(self, message: str) -> None:
+        self.apply_task = None
+        self.update_apply_control()
+        self.file_status.setText(f"Apply failed: {message}")
+
     def finish_backup(self, result: BackupResult) -> None:
         self.backup_task = None
         self.update_backup_controls()
@@ -1097,8 +1201,8 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def closeEvent(self, event) -> None:
-        if self.backup_task is not None or self.browse_task is not None:
-            self.backup_status.setText("Wait for the backup operation to finish before closing.")
+        if self.backup_task is not None or self.browse_task is not None or self.apply_task is not None:
+            self.backup_status.setText("Wait for the configuration operation to finish before closing.")
             event.ignore()
             return
         if any(self.has_pending_changes(path) for path in self.documents):
