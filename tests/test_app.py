@@ -10,6 +10,7 @@ from i3_rice_gui import app
 from i3_rice_gui.backups import BackupStore
 from i3_rice_gui.discovery import discover
 from i3_rice_gui.document import ConfigDocument
+from i3_rice_gui.install_catalog import PackageSpec, PackageState, PackageStatus
 from i3_rice_gui.validation import ValidationResult, ValidationStatus
 
 
@@ -33,12 +34,28 @@ def test_window_shows_actual_config_as_an_in_memory_draft(tmp_path, monkeypatch)
     assert window.heading.text() == "i3"
     assert not window.editor.isReadOnly()
     assert window.editor.toPlainText() == "# custom\nset $mod Mod4\n"
-    assert "cannot be saved or applied" in window.notice.text()
+    assert "reviewed and applied" in window.notice.text()
     window.navigation.setCurrentRow(2)
     assert window.heading.text() == "Polybar"
     assert "Not found" in window.editor.toPlainText()
     assert config.read_text() == "# custom\nset $mod Mod4\n"
     window.close()
+
+
+def test_apt_setup_dialog_shows_reviewable_plan():
+    qt_app = QApplication.instance() or QApplication([])
+    statuses = (
+        PackageStatus(PackageSpec("i3", "i3", "i3 window manager"), PackageState.INSTALLED),
+        PackageStatus(PackageSpec("polybar", "polybar", "Polybar"), PackageState.MISSING),
+    )
+
+    dialog = app.AptSetupDialog(statuses)
+
+    assert "Install: polybar" in dialog.plan.toPlainText()
+    assert "Already installed: i3" in dialog.plan.toPlainText()
+    assert dialog.checkboxes["i3"].isChecked() is True
+    assert dialog.checkboxes["polybar"].isChecked() is True
+    dialog.close()
 
 
 def test_gap_draft_sync_conflicts_and_navigation(tmp_path, monkeypatch):

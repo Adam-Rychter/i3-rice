@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QMainWindow, QMessageBox, QPlainTextEdit,
-    QPushButton, QScrollArea, QSlider, QSplitter, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QSlider, QSplitter, QVBoxLayout, QWidget, QCheckBox,
 )
 
 from .backup_browser import BackupBrowser
@@ -37,6 +37,9 @@ from .rofi_radius import (
 from .settings import ColorSetting, NumericSetting
 from .validation import ValidationResult, ValidationStatus, validate_i3
 from .persistence import ApplyError, ApplyResult, apply_document, restore_backup
+from .install_catalog import (
+    PackageState, PackageStatus, build_apt_plan, detect_apt_packages,
+)
 
 
 STYLE = """
@@ -289,6 +292,20 @@ class RestoreTask(QRunnable):
             self.signals.complete.emit(result)
 
 
+class AptScanTask(QRunnable):
+    def __init__(self) -> None:
+        super().__init__()
+        self.signals = BackupSignals()
+
+    def run(self) -> None:
+        try:
+            result = detect_apt_packages()
+        except (OSError, ValueError) as exc:
+            self.signals.error.emit(str(exc))
+        else:
+            self.signals.complete.emit(result)
+
+
 class BrowseBackupsTask(QRunnable):
     def __init__(self, path: Path) -> None:
         super().__init__()
@@ -304,6 +321,63 @@ class BrowseBackupsTask(QRunnable):
             self.signals.complete.emit(versions)
 
 
+class AptSetupDialog(QDialog):
+    def __init__(self, statuses: tuple[PackageStatus, ...], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.statuses = statuses
+        self.checkboxes: dict[str, QCheckBox] = {}
+        self.setWindowTitle("Review apt setup")
+        self.resize(620, 560)
+        layout = QVBoxLayout(self)
+        intro = QLabel(
+            "Select components to include in a proposed apt plan. No package "
+            "operations are executed from this review."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        for status in statuses:
+            checkbox = QCheckBox(
+                f"{status.spec.description}  [{status.spec.package}] — {status.state.value}"
+            )
+            checkbox.setChecked(True)
+            checkbox.setEnabled(status.state is not PackageState.INSTALLED)
+            checkbox.setToolTip(status.detail)
+            checkbox.stateChanged.connect(self.update_plan)
+            self.checkboxes[status.spec.component] = checkbox
+            layout.addWidget(checkbox)
+        self.plan = QPlainTextEdit()
+        self.plan.setObjectName("aptPlan")
+        self.plan.setReadOnly(True)
+        layout.addWidget(self.plan, 1)
+        self.status = QLabel("Review only; installation execution is not implemented yet.")
+        self.status.setObjectName("muted")
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.update_plan()
+
+    def update_plan(self) -> None:
+        selected = [
+            component for component, checkbox in self.checkboxes.items() if checkbox.isChecked()
+        ]
+        plan = build_apt_plan(selected, self.statuses)
+        lines = ["Proposed apt operation:"]
+        lines.append(
+            "Install: " + (", ".join(plan.packages) if plan.packages else "none")
+        )
+        lines.append(
+            "Already installed: "
+            + (", ".join(plan.already_installed) if plan.already_installed else "none")
+        )
+        if plan.unknown_packages:
+            lines.append("Unknown status: " + ", ".join(plan.unknown_packages))
+        if plan.unsupported_components:
+            lines.append("Unsupported: " + ", ".join(plan.unsupported_components))
+        self.plan.setPlainText("\n".join(lines))
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -316,6 +390,7 @@ class MainWindow(QMainWindow):
         self.apply_task: ApplyTask | None = None
         self.restore_task: RestoreTask | None = None
         self.browse_task: BrowseBackupsTask | None = None
+        self.apt_task: AptScanTask | None = None
         self.documents: dict[Path, ConfigDocument] = {}
         self.snippets: dict[Path, dict[str, str]] = {}
         self.staged_backups: set[Path] = set()
@@ -359,6 +434,9 @@ class MainWindow(QMainWindow):
         self.refresh = QPushButton("Refresh discovery")
         self.refresh.clicked.connect(self.start_scan)
         side.addWidget(self.refresh)
+        self.setup_button = QPushButton("Review apt setup")
+        self.setup_button.clicked.connect(self.start_apt_review)
+        side.addWidget(self.setup_button)
         layout.addWidget(sidebar)
 
         main = QWidget()
@@ -376,7 +454,7 @@ class MainWindow(QMainWindow):
         self.description.setObjectName("muted")
         content.addWidget(self.description)
         self.notice = QLabel(
-            "Draft-only prototype · Edits stay in memory and cannot be saved or applied."
+            "Draft changes stay in memory until explicitly reviewed and applied."
         )
         self.notice.setWordWrap(True)
         self.notice.setObjectName("notice")
@@ -523,12 +601,36 @@ class MainWindow(QMainWindow):
         self.session.setText("DISCOVERY FAILED")
         self.notice.setText(message)
 
+    def start_apt_review(self) -> None:
+        if self.apt_task is not None:
+            return
+        self.apt_task = AptScanTask()
+        self.apt_task.signals.complete.connect(self.finish_apt_review)
+        self.apt_task.signals.error.connect(self.apt_review_failed)
+        self.setup_button.setEnabled(False)
+        self.notice.setText("Checking curated apt package status…")
+        QThreadPool.globalInstance().start(self.apt_task)
+
+    def finish_apt_review(self, statuses: tuple[PackageStatus, ...]) -> None:
+        self.apt_task = None
+        self.setup_button.setEnabled(True)
+        if not statuses:
+            self.apt_review_failed("The apt catalog is empty.")
+            return
+        self.notice.setText("Apt package status loaded; review the proposed setup plan.")
+        AptSetupDialog(statuses, self).exec()
+
+    def apt_review_failed(self, message: str) -> None:
+        self.apt_task = None
+        self.setup_button.setEnabled(True)
+        self.notice.setText(f"Apt package review failed: {message}")
+
     def finish_scan(self, result: DesktopStatus) -> None:
         selected = self.navigation.currentRow()
         self.status = result
         self.session.setText(f"{result.session.upper()}  ·  {result.desktop.upper()}")
         self.notice.setText(
-            "Draft-only prototype · Edits stay in memory and cannot be saved or applied."
+            "Draft changes stay in memory until explicitly reviewed and applied."
         )
         self.navigation.blockSignals(True)
         self.navigation.clear()
@@ -1262,7 +1364,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         if (self.backup_task is not None or self.browse_task is not None
-                or self.apply_task is not None or self.restore_task is not None):
+                or self.apply_task is not None or self.restore_task is not None
+                or self.apt_task is not None):
             self.backup_status.setText("Wait for the configuration operation to finish before closing.")
             event.ignore()
             return
