@@ -38,7 +38,10 @@ from .settings import ColorSetting, NumericSetting
 from .validation import ValidationResult, ValidationStatus, validate_i3
 from .persistence import ApplyError, ApplyResult, apply_document, restore_backup
 from .install_catalog import (
-    PackageState, PackageStatus, build_apt_plan, detect_apt_packages,
+    AptPlan, PackageState, PackageStatus, build_apt_plan, detect_apt_packages,
+)
+from .apt_executor import (
+    AptExecutionError, AptExecutionResult, execute_apt_plan,
 )
 
 
@@ -306,6 +309,21 @@ class AptScanTask(QRunnable):
             self.signals.complete.emit(result)
 
 
+class AptInstallTask(QRunnable):
+    def __init__(self, plan: AptPlan) -> None:
+        super().__init__()
+        self.plan = plan
+        self.signals = BackupSignals()
+
+    def run(self) -> None:
+        try:
+            result = execute_apt_plan(self.plan)
+        except (AptExecutionError, OSError) as exc:
+            self.signals.error.emit(str(exc))
+        else:
+            self.signals.complete.emit(result)
+
+
 class BrowseBackupsTask(QRunnable):
     def __init__(self, path: Path) -> None:
         super().__init__()
@@ -326,6 +344,7 @@ class AptSetupDialog(QDialog):
         super().__init__(parent)
         self.statuses = statuses
         self.checkboxes: dict[str, QCheckBox] = {}
+        self.install_requested = False
         self.setWindowTitle("Review apt setup")
         self.resize(620, 560)
         layout = QVBoxLayout(self)
@@ -349,20 +368,33 @@ class AptSetupDialog(QDialog):
         self.plan.setObjectName("aptPlan")
         self.plan.setReadOnly(True)
         layout.addWidget(self.plan, 1)
-        self.status = QLabel("Review only; installation execution is not implemented yet.")
+        self.status = QLabel(
+            "Installation requires a second confirmation and uses the bounded pkexec executor."
+        )
         self.status.setObjectName("muted")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        install = buttons.addButton(
+            "Install selected packages", QDialogButtonBox.ButtonRole.AcceptRole
+        )
+        install.clicked.connect(self.request_install)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.update_plan()
 
-    def update_plan(self) -> None:
+    def request_install(self) -> None:
+        self.install_requested = True
+        self.accept()
+
+    def selected_plan(self) -> AptPlan:
         selected = [
             component for component, checkbox in self.checkboxes.items() if checkbox.isChecked()
         ]
-        plan = build_apt_plan(selected, self.statuses)
+        return build_apt_plan(selected, self.statuses)
+
+    def update_plan(self) -> None:
+        plan = self.selected_plan()
         lines = ["Proposed apt operation:"]
         lines.append(
             "Install: " + (", ".join(plan.packages) if plan.packages else "none")
@@ -391,6 +423,7 @@ class MainWindow(QMainWindow):
         self.restore_task: RestoreTask | None = None
         self.browse_task: BrowseBackupsTask | None = None
         self.apt_task: AptScanTask | None = None
+        self.apt_install_task: AptInstallTask | None = None
         self.documents: dict[Path, ConfigDocument] = {}
         self.snippets: dict[Path, dict[str, str]] = {}
         self.staged_backups: set[Path] = set()
@@ -618,12 +651,57 @@ class MainWindow(QMainWindow):
             self.apt_review_failed("The apt catalog is empty.")
             return
         self.notice.setText("Apt package status loaded; review the proposed setup plan.")
-        AptSetupDialog(statuses, self).exec()
+        dialog = AptSetupDialog(statuses, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.install_requested:
+            self.start_apt_install(dialog.selected_plan())
 
     def apt_review_failed(self, message: str) -> None:
         self.apt_task = None
         self.setup_button.setEnabled(True)
         self.notice.setText(f"Apt package review failed: {message}")
+
+    def start_apt_install(self, plan: AptPlan) -> None:
+        if self.apt_install_task is not None:
+            return
+        if not plan.packages:
+            self.notice.setText("The selected apt plan has no missing packages.")
+            return
+        packages = ", ".join(plan.packages)
+        answer = QMessageBox.question(
+            self, "Install apt packages?",
+            f"Install these packages using pkexec?\n\n{packages}\n\n"
+            "No administrator password is handled by the application.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.apt_install_task = AptInstallTask(plan)
+        self.apt_install_task.signals.complete.connect(self.finish_apt_install)
+        self.apt_install_task.signals.error.connect(self.apt_install_failed)
+        self.setup_button.setEnabled(False)
+        self.notice.setText("Installing selected apt packages…")
+        QThreadPool.globalInstance().start(self.apt_install_task)
+
+    def finish_apt_install(self, result: AptExecutionResult) -> None:
+        self.apt_install_task = None
+        self.setup_button.setEnabled(True)
+        succeeded = [item.package for item in result.operations
+                     if item.state.value == "succeeded"]
+        failed = [item.package for item in result.operations
+                  if item.state.value == "failed"]
+        skipped = [item.package for item in result.operations
+                   if item.state.value == "skipped"]
+        summary = (
+            f"Installation complete. Succeeded: {len(succeeded)}; "
+            f"failed: {len(failed)}; skipped: {len(skipped)}."
+        )
+        self.notice.setText(summary)
+        if failed or skipped:
+            QMessageBox.warning(self, "Apt installation result", summary)
+
+    def apt_install_failed(self, message: str) -> None:
+        self.apt_install_task = None
+        self.setup_button.setEnabled(True)
+        self.notice.setText(f"Apt installation failed: {message}")
 
     def finish_scan(self, result: DesktopStatus) -> None:
         selected = self.navigation.currentRow()
@@ -1365,7 +1443,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if (self.backup_task is not None or self.browse_task is not None
                 or self.apply_task is not None or self.restore_task is not None
-                or self.apt_task is not None):
+                or self.apt_task is not None or self.apt_install_task is not None):
             self.backup_status.setText("Wait for the configuration operation to finish before closing.")
             event.ignore()
             return
