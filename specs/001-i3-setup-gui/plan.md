@@ -280,9 +280,10 @@ and existing project files unchanged during early prototype work.
    Rofi window radius in the project's theme; and Dunst frame colors. These
    synchronize with their snippets and full-file drafts, and unsupported
    syntax is disabled. Other candidate controls and shared colors remain open.
-5. **Apt setup — in progress**: Curated apt package detection and a reviewable
-   missing-package plan are implemented as a backend. Add GUI plan review,
-   bounded authorization and execution, and honest per-operation results. Exercise
+5. **Apt setup — in progress**: Curated apt package detection, GUI plan review,
+   and a bounded `pkexec` executor with per-package results are implemented.
+   Exercise authorization refusal, package failure, and partial completion in
+   the VM before enabling installation from the GUI. Add
    success and failure cases in the VM; never call the old installer.
 6. **Preview and recovery — not started**: Implement independent timed rollback and
    confirmation/cancellation for a small verified subset, then add additional
