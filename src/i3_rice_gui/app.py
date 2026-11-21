@@ -36,7 +36,7 @@ from .rofi_radius import (
 )
 from .settings import ColorSetting, NumericSetting
 from .validation import ValidationResult, ValidationStatus, validate_i3
-from .persistence import ApplyError, ApplyResult, apply_document
+from .persistence import ApplyError, ApplyResult, apply_document, restore_backup
 
 
 STYLE = """
@@ -273,6 +273,22 @@ class ApplyTask(QRunnable):
             self.signals.complete.emit(result)
 
 
+class RestoreTask(QRunnable):
+    def __init__(self, document: ConfigDocument, version: BackupVersion) -> None:
+        super().__init__()
+        self.document = document
+        self.version = version
+        self.signals = BackupSignals()
+
+    def run(self) -> None:
+        try:
+            result = restore_backup(self.document, self.version)
+        except (ApplyError, OSError) as exc:
+            self.signals.error.emit(str(exc))
+        else:
+            self.signals.complete.emit(result)
+
+
 class BrowseBackupsTask(QRunnable):
     def __init__(self, path: Path) -> None:
         super().__init__()
@@ -298,6 +314,7 @@ class MainWindow(QMainWindow):
         self.validation_revision = 0
         self.backup_task: BackupTask | None = None
         self.apply_task: ApplyTask | None = None
+        self.restore_task: RestoreTask | None = None
         self.browse_task: BrowseBackupsTask | None = None
         self.documents: dict[Path, ConfigDocument] = {}
         self.snippets: dict[Path, dict[str, str]] = {}
@@ -1095,12 +1112,22 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             self.backup_status.setText(f"Unable to check external changes: {exc}")
             return
-        message = "Load this backup into an in-memory draft? No files will be overwritten."
-        if original_document is not None and self.has_pending_changes(path):
-            message += "\n\nThis replaces the pending draft and any invalid snippet."
+        selected = browser.selected_version()
+        if browser.restore_requested:
+            message = (
+                f"Restore backup {selected.record.identifier[:12]} to {path}?\n\n"
+                "The current disk file will be backed up first. Any in-memory draft "
+                "will be discarded, and the change will be written to disk."
+            )
+            title = "Restore backup to disk?"
+        else:
+            message = "Load this backup into an in-memory draft? No files will be overwritten."
+            if original_document is not None and self.has_pending_changes(path):
+                message += "\n\nThis replaces the pending draft and any invalid snippet."
+            title = "Load backup as draft?"
         if conflict:
             message += "\n\nThe disk file changed externally; the conflict remains unresolved."
-        if QMessageBox.question(self, "Load backup as draft?", message) != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self, title, message) != QMessageBox.StandardButton.Yes:
             return
         # A modal confirmation can process file-watcher events before returning.
         if (self.current_path != path or self.documents.get(path) is not original_document
@@ -1117,7 +1144,20 @@ class MainWindow(QMainWindow):
                 self.backup_status.setText(f"Unable to check external changes: {exc}")
                 return
             self.documents[path] = document
-        document.load_draft(browser.selected_version().text)
+        if browser.restore_requested:
+            if (self.current_path != path or self.documents.get(path) is not document
+                    or document.draft != draft or self.snippets.get(path, {}) != snippet
+                    or (path in self.staged_backups) != staged):
+                self.backup_status.setText("The file or draft changed; review backups again.")
+                return
+            self.restore_task = RestoreTask(document, selected)
+            self.restore_task.signals.complete.connect(self.finish_restore)
+            self.restore_task.signals.error.connect(self.restore_failed)
+            self.backup_status.setText(f"Restoring backup to {path}…")
+            self.browse_button.setEnabled(False)
+            QThreadPool.globalInstance().start(self.restore_task)
+            return
+        document.load_draft(selected.text)
         self.snippets.pop(path, None)
         self.staged_backups.add(path)
         self.invalidate_validation()
@@ -1130,6 +1170,26 @@ class MainWindow(QMainWindow):
         self.browse_task = None
         self.browse_button.setEnabled(self.current_path is not None)
         self.backup_status.setText(f"Unable to load backups: {message}")
+
+    def finish_restore(self, result: ApplyResult) -> None:
+        task = self.restore_task
+        self.restore_task = None
+        self.browse_button.setEnabled(self.current_path is not None)
+        if task is None or self.documents.get(result.path) is not task.document:
+            self.backup_status.setText("Restore completed, but the selected document changed.")
+            return
+        self.snippets.pop(result.path, None)
+        self.staged_backups.discard(result.path)
+        self.invalidate_validation()
+        self.show_config()
+        self.backup_status.setText(
+            f"Restored {result.path} successfully. A backup of the previous file was created."
+        )
+
+    def restore_failed(self, message: str) -> None:
+        self.restore_task = None
+        self.browse_button.setEnabled(self.current_path is not None)
+        self.backup_status.setText(f"Restore failed: {message}")
 
     def reload_document(self) -> None:
         if self.current_path is None:
@@ -1201,7 +1261,8 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def closeEvent(self, event) -> None:
-        if self.backup_task is not None or self.browse_task is not None or self.apply_task is not None:
+        if (self.backup_task is not None or self.browse_task is not None
+                or self.apply_task is not None or self.restore_task is not None):
             self.backup_status.setText("Wait for the configuration operation to finish before closing.")
             event.ignore()
             return

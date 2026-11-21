@@ -19,5 +19,6 @@ def test_backup_selection_updates_comparison(tmp_path):
     browser.selection.setCurrentIndex(1)
     assert "+first" in browser.diff.toPlainText()
     assert browser.selected_version().text == "first\n"
+    assert not browser.restore_requested
     browser.close()
     qt_app.processEvents()

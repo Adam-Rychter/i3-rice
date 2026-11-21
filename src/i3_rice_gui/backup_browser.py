@@ -22,6 +22,7 @@ class BackupBrowser(QDialog):
         self.path = path
         self.draft = draft
         self.versions = versions
+        self.restore_requested = False
         self.setWindowTitle("Review backups")
         self.resize(780, 560)
         layout = QVBoxLayout(self)
@@ -50,12 +51,18 @@ class BackupBrowser(QDialog):
         self.diff.setFont(QFont("monospace", 10))
         layout.addWidget(self.diff)
         buttons = QDialogButtonBox()
-        buttons.addButton("Load as draft", QDialogButtonBox.ButtonRole.AcceptRole)
+        load = buttons.addButton("Load as draft", QDialogButtonBox.ButtonRole.AcceptRole)
+        load.clicked.connect(self.accept)
+        restore = buttons.addButton("Restore to disk", QDialogButtonBox.ButtonRole.DestructiveRole)
+        restore.clicked.connect(self.request_restore)
         buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.update_diff()
+
+    def request_restore(self) -> None:
+        self.restore_requested = True
+        self.accept()
 
     def selected_version(self) -> BackupVersion:
         return self.versions[self.selection.currentIndex()]
