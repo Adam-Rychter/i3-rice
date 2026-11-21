@@ -1,6 +1,36 @@
 # Tiling WM Rice: Project Memory
 
-Last updated: 2026-11-20
+Last updated: 2026-11-21
+
+## GUI prototype development handoff
+
+Current pushed HEAD: `fa3612e`.
+
+Completed safe GUI milestones:
+
+- Atomic apply with external-change detection, backups, permission preservation, and missing-file creation.
+- Backup restore to disk with conflict checks and GUI confirmation.
+- Curated apt package detection, review, and bounded `pkexec` execution.
+- Workspace label editing with comment preservation.
+- Read-only keybinding inspection, conflict detection, and safe command editing.
+- Literal i3 variable inspection, reference counts, safe value editing, and include warnings.
+- Read-only `xrandr` display inspection showing connected outputs and geometry.
+- Read-only `feh --bg-*` wallpaper reference inspection with image existence status.
+
+Validation:
+
+- Latest local suite: `166 passed, 2 skipped`.
+- VM checkout: `/home/iktai/i3-rice-vm-test`.
+- VM validation is currently blocked because SSH to `iktai@192.168.241.135` returns `Permission denied (publickey,password)`. Do not collect or store the VM password; use an interactive SSH session or restore key-based access.
+
+Next development priorities:
+
+- Add safe included-file discovery and staged multi-file editing/validation.
+- Expand component controls for fonts/scaling and additional wallpaper workflows.
+- Implement shared palette propagation with an explicit affected-file review.
+- Design the independent 30-second live-preview rollback/watchdog.
+- Add profile import/export with conflict and asset-safety checks.
+- Re-test the fresh VM checkout and perform the integrated i3 demonstration once SSH access is available.
 
 ## Goal
 
