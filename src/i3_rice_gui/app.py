@@ -38,6 +38,7 @@ from .settings import ColorSetting, NumericSetting
 from .validation import ValidationResult, ValidationStatus, validate_i3
 from .persistence import ApplyError, ApplyResult, apply_document, restore_backup
 from .workspace_labels import find_workspace, find_workspace_labels, replace_workspace_label
+from .keybindings import binding_conflicts, find_keybindings
 from .install_catalog import (
     AptPlan, PackageState, PackageStatus, build_apt_plan, detect_apt_packages,
 )
@@ -243,6 +244,38 @@ class WorkspaceControl(QWidget):
         self.editor.setEnabled(True)
         self.label.setText(f"Workspace {self.number}: {value}")
         self.help.setText("Edit the literal label; changes are draft only.")
+
+
+class KeybindingSummary(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        title = QLabel("Keybindings")
+        title.setObjectName("section")
+        layout.addWidget(title)
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setMaximumHeight(180)
+        self.text.setPlaceholderText("No literal bindsym entries found.")
+        layout.addWidget(self.text)
+        self.help = QLabel("Keybinding commands are shown read-only until conflict-safe editing is implemented.")
+        self.help.setObjectName("muted")
+        self.help.setWordWrap(True)
+        layout.addWidget(self.help)
+
+    def clear(self, message: str) -> None:
+        self.text.clear()
+        self.help.setText(message)
+
+    def show_bindings(self, text: str, conflicts: tuple[str, ...]) -> None:
+        self.text.setPlainText(text or "No literal bindsym entries found.")
+        if conflicts:
+            self.help.setText("Conflict: duplicate trigger(s): " + ", ".join(conflicts))
+        else:
+            self.help.setText(
+                "Keybinding commands are shown read-only until conflict-safe editing is implemented."
+            )
 
 
 class ScanSignals(QObject):
@@ -579,6 +612,8 @@ class MainWindow(QMainWindow):
             )
             self.workspace_controls[number] = control
             detail_layout.addWidget(control)
+        self.keybinding_summary = KeybindingSummary()
+        detail_layout.addWidget(self.keybinding_summary)
         detail_layout.addStretch()
         detail_scroll = QScrollArea()
         detail_scroll.setWidgetResizable(True)
@@ -810,6 +845,8 @@ class MainWindow(QMainWindow):
         for control in self.workspace_controls.values():
             control.clear("Select a configuration.")
             control.setVisible(selected == "workspaces")
+        self.keybinding_summary.setVisible(selected == "workspaces")
+        self.keybinding_summary.clear("Select an i3 configuration.")
         if not data:
             return
         path, _ = data
@@ -853,6 +890,7 @@ class MainWindow(QMainWindow):
             self.file_status.setText(f"External change detected; unable to reload: {reload_error}")
         self.update_appearance()
         self.update_workspace_controls()
+        self.update_keybinding_summary()
         self.update_validation_controls()
 
     def watch_file(self, path: Path | None) -> None:
@@ -956,6 +994,7 @@ class MainWindow(QMainWindow):
         self.invalidate_validation()
         self.update_appearance()
         self.update_workspace_controls()
+        self.update_keybinding_summary()
         self.update_file_status()
 
     def update_file_status(self, changed: bool | None = None) -> None:
@@ -1052,6 +1091,14 @@ class MainWindow(QMainWindow):
             else:
                 control.show_value(label.name)
 
+    def update_keybinding_summary(self) -> None:
+        if self.current_path is None or self.selected_component() != "workspaces":
+            return
+        document = self.documents[self.current_path]
+        bindings = find_keybindings(document.draft)
+        lines = [f"{binding.trigger}  →  {binding.command}" for binding in bindings]
+        self.keybinding_summary.show_bindings("\n".join(lines), binding_conflicts(bindings))
+
     def edit_workspace(self, number: int, text: str) -> None:
         if self.current_path is None or self.selected_component() != "workspaces":
             return
@@ -1092,6 +1139,7 @@ class MainWindow(QMainWindow):
         self.show_draft()
         self.update_appearance()
         self.update_workspace_controls()
+        self.update_keybinding_summary()
         if error is not None:
             self.setting_controls[kind].help.setText(error)
         self.update_file_status()
@@ -1112,6 +1160,7 @@ class MainWindow(QMainWindow):
         self.show_draft()
         self.update_appearance()
         self.update_workspace_controls()
+        self.update_keybinding_summary()
         self.update_file_status()
 
     def choose_color(self, kind: str) -> None:
@@ -1149,6 +1198,7 @@ class MainWindow(QMainWindow):
         self.show_draft()
         self.update_appearance()
         self.update_workspace_controls()
+        self.update_keybinding_summary()
         self.update_file_status()
 
     def selected_component(self) -> str | None:
@@ -1433,6 +1483,7 @@ class MainWindow(QMainWindow):
         self.show_draft()
         self.update_appearance()
         self.update_workspace_controls()
+        self.update_keybinding_summary()
         self.update_file_status()
         self.backup_status.setText("Backup loaded as a draft. The disk file was not changed.")
 

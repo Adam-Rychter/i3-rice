@@ -61,7 +61,11 @@ def test_apt_setup_dialog_shows_reviewable_plan():
 def test_workspace_label_control_updates_i3_draft(tmp_path, monkeypatch):
     config = tmp_path / ".config/i3/config"
     config.parent.mkdir(parents=True)
-    original = 'set $ws2 "2:code"  # keep comment\nset $ws1 "1:term"\n'
+    original = (
+        'set $ws2 "2:code"  # keep comment\n'
+        'set $ws1 "1:term"\n'
+        'bindsym $mod+Return exec xterm\n'
+    )
     config.write_text(original)
     desktop = discover(tmp_path, {"PATH": "", "DISPLAY": ":1"})
     monkeypatch.setattr(app, "discover", lambda: desktop)
@@ -76,6 +80,7 @@ def test_workspace_label_control_updates_i3_draft(tmp_path, monkeypatch):
     window.navigation.setCurrentRow(1)
     assert window.workspace_controls[1].editor.text() == "1:term"
     assert window.workspace_controls[2].editor.text() == "2:code"
+    assert "$mod+Return  →  exec xterm" in window.keybinding_summary.text.toPlainText()
     window.workspace_controls[2].editor.setText("2:editor")
     window.workspace_controls[2].editor.textEdited.emit("2:editor")
 
