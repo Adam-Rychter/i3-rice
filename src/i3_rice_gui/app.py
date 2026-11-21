@@ -39,7 +39,9 @@ from .validation import ValidationResult, ValidationStatus, validate_i3
 from .persistence import ApplyError, ApplyResult, apply_document, restore_backup
 from .workspace_labels import find_workspace, find_workspace_labels, replace_workspace_label
 from .keybindings import binding_conflicts, find_keybindings
-from .i3_variables import find_variables, variable_references
+from .i3_variables import (
+    I3Variable, find_variable, find_variables, replace_variable_value, variable_references,
+)
 from .install_catalog import (
     AptPlan, PackageState, PackageStatus, build_apt_plan, detect_apt_packages,
 )
@@ -280,6 +282,8 @@ class KeybindingSummary(QWidget):
 
 
 class VariableSummary(QWidget):
+    value_edited = Signal(str, str)
+
     def __init__(self) -> None:
         super().__init__()
         layout = QVBoxLayout(self)
@@ -287,27 +291,54 @@ class VariableSummary(QWidget):
         title = QLabel("Shared variables")
         title.setObjectName("section")
         layout.addWidget(title)
-        self.text = QPlainTextEdit()
-        self.text.setReadOnly(True)
-        self.text.setMaximumHeight(150)
-        self.text.setPlaceholderText("No literal i3 variables found.")
-        layout.addWidget(self.text)
+        self.rows = QVBoxLayout()
+        self.rows.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(self.rows)
+        self.edits: dict[str, QLineEdit] = {}
         self.help = QLabel(
-            "References are shown read-only until variable-level editing and affected-setting choices are implemented."
+            "Changing a variable updates every reference to it. Values stay conservative and cannot contain comments or newlines."
         )
         self.help.setObjectName("muted")
         self.help.setWordWrap(True)
         layout.addWidget(self.help)
 
     def clear(self, message: str) -> None:
-        self.text.clear()
+        self._clear_rows()
         self.help.setText(message)
 
-    def show_variables(self, text: str) -> None:
-        self.text.setPlainText(text or "No literal i3 variables found.")
+    def show_variables(
+        self, variables: tuple[I3Variable, ...], references: dict[str, int],
+    ) -> None:
+        self._clear_rows()
+        for variable in variables:
+            row = QHBoxLayout()
+            label = QLabel(f"${variable.name} ({references[variable.name]} references)")
+            label.setMinimumWidth(180)
+            editor = QLineEdit(variable.value)
+            editor.textEdited.connect(
+                lambda value, name=variable.name: self.value_edited.emit(name, value)
+            )
+            row.addWidget(label)
+            row.addWidget(editor, 1)
+            self.rows.addLayout(row)
+            self.edits[variable.name] = editor
         self.help.setText(
-            "References are shown read-only until variable-level editing and affected-setting choices are implemented."
+            "Changing a variable updates every reference to it. Values stay conservative and cannot contain comments or newlines."
         )
+
+    def _clear_rows(self) -> None:
+        self.edits.clear()
+        while self.rows.count():
+            item = self.rows.takeAt(0)
+            if item.layout() is not None:
+                child = item.layout()
+                while child.count():
+                    widget_item = child.takeAt(0)
+                    if widget_item.widget() is not None:
+                        widget_item.widget().deleteLater()
+                child.deleteLater()
+            elif item.widget() is not None:
+                item.widget().deleteLater()
 
 
 class ScanSignals(QObject):
@@ -647,6 +678,7 @@ class MainWindow(QMainWindow):
         self.keybinding_summary = KeybindingSummary()
         detail_layout.addWidget(self.keybinding_summary)
         self.variable_summary = VariableSummary()
+        self.variable_summary.value_edited.connect(self.edit_variable)
         detail_layout.addWidget(self.variable_summary)
         detail_layout.addStretch()
         detail_scroll = QScrollArea()
@@ -1146,11 +1178,31 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             self.variable_summary.clear(str(exc))
             return
-        lines = [
-            f"${variable.name} = {variable.value}  ({len(variable_references(document.draft, variable.name))} references)"
+        references = {
+            variable.name: len(variable_references(document.draft, variable.name))
             for variable in variables
-        ]
-        self.variable_summary.show_variables("\n".join(lines))
+        }
+        self.variable_summary.show_variables(variables, references)
+
+    def edit_variable(self, name: str, value: str) -> None:
+        if self.current_path is None or self.selected_component() not in {"i3", "workspaces"}:
+            return
+        document = self.documents[self.current_path]
+        try:
+            setting = find_variable(document.draft, name)
+            replacement = replace_variable_value(setting.line, value)
+            document.replace(setting.start, setting.end, setting.line, replacement)
+        except ValueError as exc:
+            self.variable_summary.help.setText(str(exc))
+            self.update_file_status()
+            return
+        self.invalidate_validation()
+        self.show_draft()
+        self.update_appearance()
+        self.update_workspace_controls()
+        self.update_keybinding_summary()
+        self.update_variable_summary()
+        self.update_file_status()
 
     def edit_workspace(self, number: int, text: str) -> None:
         if self.current_path is None or self.selected_component() != "workspaces":

@@ -89,6 +89,31 @@ def test_workspace_label_control_updates_i3_draft(tmp_path, monkeypatch):
     window.close()
 
 
+def test_shared_variable_control_updates_all_references(tmp_path, monkeypatch):
+    config = tmp_path / ".config/i3/config"
+    config.parent.mkdir(parents=True)
+    original = "set $mod Mod4\nbindsym $mod+Return exec xterm\n"
+    config.write_text(original)
+    desktop = discover(tmp_path, {"PATH": "", "DISPLAY": ":1"})
+    monkeypatch.setattr(app, "discover", lambda: desktop)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
+    qt_app = QApplication.instance() or QApplication([])
+    window = app.MainWindow()
+    deadline = time.monotonic() + 5
+    while window.status is None and time.monotonic() < deadline:
+        qt_app.processEvents()
+        time.sleep(0.01)
+
+    editor = window.variable_summary.edits["mod"]
+    editor.setText("Mod1")
+    editor.textEdited.emit("Mod1")
+
+    assert window.documents[config].draft == "set $mod Mod1\nbindsym $mod+Return exec xterm\n"
+    assert window.variable_summary.edits["mod"].text() == "Mod1"
+    assert config.read_text() == original
+    window.close()
+
+
 def test_gap_draft_sync_conflicts_and_navigation(tmp_path, monkeypatch):
     config = tmp_path / ".config/i3/config"
     config.parent.mkdir(parents=True)

@@ -16,8 +16,11 @@ frame colors in the global and urgency sections have individual color pickers;
 other rules or drop-in files can override them. The bundled Rofi theme can be
 selected separately to edit its literal window radius (0–100 px); imports,
 dynamic scopes, and ambiguous window selectors require manual editing. Other
-theme files can override the selected file. Files that cannot be represented
-safely remain read-only. Draft edits can be reviewed and applied after
+theme files can override the selected file. Literal i3 variables are listed
+with reference counts and can be edited from the i3 and workspace panels; the
+editor rejects comments, quotes, and newlines to keep shared replacements safe.
+Files that cannot be represented safely remain read-only. Draft edits can be
+reviewed and applied after
 confirmation; existing files are backed up and written atomically, while
 drafts are still discarded on exit after confirmation. A review dialog shows
 the diff against the original file.
