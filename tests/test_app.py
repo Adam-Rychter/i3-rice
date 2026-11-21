@@ -58,6 +58,32 @@ def test_apt_setup_dialog_shows_reviewable_plan():
     dialog.close()
 
 
+def test_workspace_label_control_updates_i3_draft(tmp_path, monkeypatch):
+    config = tmp_path / ".config/i3/config"
+    config.parent.mkdir(parents=True)
+    original = 'set $ws2 "2:code"  # keep comment\nset $ws1 "1:term"\n'
+    config.write_text(original)
+    desktop = discover(tmp_path, {"PATH": "", "DISPLAY": ":1"})
+    monkeypatch.setattr(app, "discover", lambda: desktop)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Yes)
+    qt_app = QApplication.instance() or QApplication([])
+    window = app.MainWindow()
+    deadline = time.monotonic() + 5
+    while window.status is None and time.monotonic() < deadline:
+        qt_app.processEvents()
+        time.sleep(0.01)
+
+    window.navigation.setCurrentRow(1)
+    assert window.workspace_controls[1].editor.text() == "1:term"
+    assert window.workspace_controls[2].editor.text() == "2:code"
+    window.workspace_controls[2].editor.setText("2:editor")
+    window.workspace_controls[2].editor.textEdited.emit("2:editor")
+
+    assert 'set $ws2 "2:editor"  # keep comment' in window.documents[config].draft
+    assert config.read_text() == original
+    window.close()
+
+
 def test_gap_draft_sync_conflicts_and_navigation(tmp_path, monkeypatch):
     config = tmp_path / ".config/i3/config"
     config.parent.mkdir(parents=True)

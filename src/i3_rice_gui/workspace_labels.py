@@ -79,7 +79,10 @@ def parse_workspace_line(line: str) -> tuple[int, str]:
 
 
 def replace_workspace_label(line: str, name: str) -> str:
-    number, _ = parse_workspace_line(line)
+    matches = _matches(line)
+    if len(matches) != 1 or matches[0].group(0) != line:
+        raise ValueError("Expected one quoted workspace assignment.")
+    match = matches[0]
     if not name or '"' in name or "\r" in name or "\n" in name or "#" in name:
         raise ValueError("Workspace label must be non-empty and contain no quotes, comments, or newlines.")
-    return f'set $ws{number} "{name}"'
+    return f'{match.group("prefix")}"{name}"{match.group("suffix")}'

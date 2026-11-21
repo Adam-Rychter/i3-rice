@@ -37,6 +37,7 @@ from .rofi_radius import (
 from .settings import ColorSetting, NumericSetting
 from .validation import ValidationResult, ValidationStatus, validate_i3
 from .persistence import ApplyError, ApplyResult, apply_document, restore_backup
+from .workspace_labels import find_workspace, find_workspace_labels, replace_workspace_label
 from .install_catalog import (
     AptPlan, PackageState, PackageStatus, build_apt_plan, detect_apt_packages,
 )
@@ -207,6 +208,41 @@ class ColorControl(QWidget):
         self.button.setStyleSheet(f"QPushButton {{ border: 3px solid {value}; }}")
         self.button.setEnabled(True)
         self.help.setText(f"Edit the line or choose a color; changes are draft only. {context}")
+
+
+class WorkspaceControl(QWidget):
+    def __init__(self, number: int) -> None:
+        super().__init__()
+        self.number = number
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.label = QLabel(f"Workspace {number}: unavailable")
+        layout.addWidget(self.label)
+        self.editor = QLineEdit()
+        self.editor.setAccessibleName(f"Workspace {number} label")
+        self.editor.setPlaceholderText("Literal workspace label")
+        self.editor.setEnabled(False)
+        layout.addWidget(self.editor)
+        self.help = QLabel("Select an i3 configuration.")
+        self.help.setObjectName("muted")
+        self.help.setWordWrap(True)
+        layout.addWidget(self.help)
+
+    def clear(self, message: str) -> None:
+        self.editor.blockSignals(True)
+        self.editor.clear()
+        self.editor.blockSignals(False)
+        self.editor.setEnabled(False)
+        self.label.setText(f"Workspace {self.number}: unavailable")
+        self.help.setText(message)
+
+    def show_value(self, value: str) -> None:
+        self.editor.blockSignals(True)
+        self.editor.setText(value)
+        self.editor.blockSignals(False)
+        self.editor.setEnabled(True)
+        self.label.setText(f"Workspace {self.number}: {value}")
+        self.help.setText("Edit the literal label; changes are draft only.")
 
 
 class ScanSignals(QObject):
@@ -535,6 +571,14 @@ class MainWindow(QMainWindow):
         self.setting_controls: dict[str, AppearanceControl | ColorControl] = {
             **self.appearance_controls, **self.color_controls,
         }
+        self.workspace_controls: dict[int, WorkspaceControl] = {}
+        for number in range(1, 6):
+            control = WorkspaceControl(number)
+            control.editor.textEdited.connect(
+                lambda text, workspace=number: self.edit_workspace(workspace, text)
+            )
+            self.workspace_controls[number] = control
+            detail_layout.addWidget(control)
         detail_layout.addStretch()
         detail_scroll = QScrollArea()
         detail_scroll.setWidgetResizable(True)
@@ -754,12 +798,18 @@ class MainWindow(QMainWindow):
         self.review_button.setEnabled(False)
         selected = self.selected_component()
         self.no_controls.setVisible(
-            not any(control.definition.component == selected
+            not (
+                any(control.definition.component == selected
                     for control in self.setting_controls.values())
+                or selected == "workspaces"
+            )
         )
         for control in self.setting_controls.values():
             control.clear("Select a configuration.")
             control.setVisible(control.definition.component == selected)
+        for control in self.workspace_controls.values():
+            control.clear("Select a configuration.")
+            control.setVisible(selected == "workspaces")
         if not data:
             return
         path, _ = data
@@ -802,6 +852,7 @@ class MainWindow(QMainWindow):
         if reload_error:
             self.file_status.setText(f"External change detected; unable to reload: {reload_error}")
         self.update_appearance()
+        self.update_workspace_controls()
         self.update_validation_controls()
 
     def watch_file(self, path: Path | None) -> None:
@@ -904,6 +955,7 @@ class MainWindow(QMainWindow):
         document.set_editor_text(self.editor.document().toRawText().replace("\u2029", "\n"))
         self.invalidate_validation()
         self.update_appearance()
+        self.update_workspace_controls()
         self.update_file_status()
 
     def update_file_status(self, changed: bool | None = None) -> None:
@@ -983,6 +1035,40 @@ class MainWindow(QMainWindow):
                 continue
             control.show_value(value, setting.context)
 
+    def update_workspace_controls(self) -> None:
+        if self.current_path is None or self.selected_component() != "workspaces":
+            return
+        document = self.documents[self.current_path]
+        try:
+            labels = {label.number: label for label in find_workspace_labels(document.draft)}
+        except ValueError as exc:
+            for control in self.workspace_controls.values():
+                control.clear(str(exc))
+            return
+        for number, control in self.workspace_controls.items():
+            label = labels.get(number)
+            if label is None:
+                control.clear(f"Workspace ${number} is not defined.")
+            else:
+                control.show_value(label.name)
+
+    def edit_workspace(self, number: int, text: str) -> None:
+        if self.current_path is None or self.selected_component() != "workspaces":
+            return
+        document = self.documents[self.current_path]
+        try:
+            setting = find_workspace(document.draft, number)
+            replacement = replace_workspace_label(setting.line, text)
+            document.replace(setting.start, setting.end, setting.line, replacement)
+        except ValueError as exc:
+            self.workspace_controls[number].help.setText(str(exc))
+            self.update_file_status()
+            return
+        self.invalidate_validation()
+        self.show_draft()
+        self.update_workspace_controls()
+        self.update_file_status()
+
     def edit_snippet(self, kind: str, text: str) -> None:
         if self.current_path is None:
             return
@@ -1005,6 +1091,7 @@ class MainWindow(QMainWindow):
         self.update_validation_controls()
         self.show_draft()
         self.update_appearance()
+        self.update_workspace_controls()
         if error is not None:
             self.setting_controls[kind].help.setText(error)
         self.update_file_status()
@@ -1024,6 +1111,7 @@ class MainWindow(QMainWindow):
         self.invalidate_validation()
         self.show_draft()
         self.update_appearance()
+        self.update_workspace_controls()
         self.update_file_status()
 
     def choose_color(self, kind: str) -> None:
@@ -1060,6 +1148,7 @@ class MainWindow(QMainWindow):
         self.invalidate_validation()
         self.show_draft()
         self.update_appearance()
+        self.update_workspace_controls()
         self.update_file_status()
 
     def selected_component(self) -> str | None:
@@ -1343,6 +1432,7 @@ class MainWindow(QMainWindow):
         self.invalidate_validation()
         self.show_draft()
         self.update_appearance()
+        self.update_workspace_controls()
         self.update_file_status()
         self.backup_status.setText("Backup loaded as a draft. The disk file was not changed.")
 
