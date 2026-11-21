@@ -41,6 +41,7 @@ from .workspace_labels import find_workspace, find_workspace_labels, replace_wor
 from .keybindings import (
     Keybinding, binding_conflicts, find_keybinding, find_keybindings, replace_keybinding_command,
 )
+from .displays import inspect_displays
 from .i3_variables import (
     I3Variable, find_variable, find_variables, has_includes, replace_variable_value,
     variable_references,
@@ -386,6 +387,36 @@ class VariableSummary(QWidget):
                 item.widget().deleteLater()
 
 
+class DisplaySummary(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        title = QLabel("Connected displays")
+        title.setObjectName("section")
+        layout.addWidget(title)
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setMaximumHeight(120)
+        layout.addWidget(self.text)
+        self.help = QLabel(
+            "Display arrangement remains read-only until a recovery path is available."
+        )
+        self.help.setObjectName("muted")
+        self.help.setWordWrap(True)
+        layout.addWidget(self.help)
+
+    def clear(self, message: str) -> None:
+        self.text.clear()
+        self.help.setText(message)
+
+    def show_displays(self, lines: str) -> None:
+        self.text.setPlainText(lines or "No displays reported.")
+        self.help.setText(
+            "Display arrangement remains read-only until a recovery path is available."
+        )
+
+
 class ScanSignals(QObject):
     complete = Signal(object)
     error = Signal(str)
@@ -726,6 +757,8 @@ class MainWindow(QMainWindow):
         self.variable_summary = VariableSummary()
         self.variable_summary.value_edited.connect(self.edit_variable)
         detail_layout.addWidget(self.variable_summary)
+        self.display_summary = DisplaySummary()
+        detail_layout.addWidget(self.display_summary)
         detail_layout.addStretch()
         detail_scroll = QScrollArea()
         detail_scroll.setWidgetResizable(True)
@@ -961,6 +994,9 @@ class MainWindow(QMainWindow):
         self.keybinding_summary.clear("Select an i3 configuration.")
         self.variable_summary.setVisible(selected in {"i3", "workspaces"})
         self.variable_summary.clear("Select an i3 configuration.")
+        self.display_summary.setVisible(selected == "displays")
+        self.display_summary.clear("Select Displays to inspect connected outputs.")
+        self.update_display_summary()
         if not data:
             return
         path, _ = data
@@ -1248,6 +1284,21 @@ class MainWindow(QMainWindow):
             for variable in variables
         }
         self.variable_summary.show_variables(variables, references, has_includes(document.draft))
+
+    def update_display_summary(self) -> None:
+        if self.selected_component() != "displays":
+            return
+        try:
+            displays = inspect_displays()
+        except ValueError as exc:
+            self.display_summary.clear(str(exc))
+            return
+        lines = [
+            f"{display.name}: {display.status}"
+            + (f"  {display.geometry}" if display.geometry else "")
+            for display in displays
+        ]
+        self.display_summary.show_displays("\n".join(lines))
 
     def edit_variable(self, name: str, value: str) -> None:
         if self.current_path is None or self.selected_component() not in {"i3", "workspaces"}:

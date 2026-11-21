@@ -21,6 +21,8 @@ with reference counts and can be edited from the i3 and workspace panels; the
 editor rejects comments, quotes, and newlines to keep shared replacements safe.
 Workspace keybinding commands can also be edited while their triggers remain fixed
 to prevent accidental duplicate bindings.
+The Displays panel reports connected X11 outputs and their current geometry
+read-only; arrangement changes remain disabled until a recovery path is tested.
 Files that cannot be represented safely remain read-only. Draft edits can be
 reviewed and applied after
 confirmation; existing files are backed up and written atomically, while
