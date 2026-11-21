@@ -19,6 +19,8 @@ dynamic scopes, and ambiguous window selectors require manual editing. Other
 theme files can override the selected file. Literal i3 variables are listed
 with reference counts and can be edited from the i3 and workspace panels; the
 editor rejects comments, quotes, and newlines to keep shared replacements safe.
+Workspace keybinding commands can also be edited while their triggers remain fixed
+to prevent accidental duplicate bindings.
 Files that cannot be represented safely remain read-only. Draft edits can be
 reviewed and applied after
 confirmation; existing files are backed up and written atomically, while

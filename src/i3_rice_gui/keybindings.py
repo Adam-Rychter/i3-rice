@@ -47,3 +47,12 @@ def find_keybinding(text: str, trigger: str) -> Keybinding:
     if len(matches) > 1:
         raise ValueError(f"Keybinding {trigger} is assigned more than once.")
     return matches[0]
+
+
+def replace_keybinding_command(line: str, command: str) -> str:
+    match = _LINE.fullmatch(line)
+    if not match:
+        raise ValueError("Expected one literal bindsym entry.")
+    if not command.strip() or "\r" in command or "\n" in command:
+        raise ValueError("Keybinding command must be non-empty and stay on one line.")
+    return f"{match.group('indent')}bindsym {match.group('trigger')} {command.strip()}"

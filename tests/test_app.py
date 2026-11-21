@@ -81,6 +81,9 @@ def test_workspace_label_control_updates_i3_draft(tmp_path, monkeypatch):
     assert window.workspace_controls[1].editor.text() == "1:term"
     assert window.workspace_controls[2].editor.text() == "2:code"
     assert "$mod+Return  →  exec xterm" in window.keybinding_summary.text.toPlainText()
+    window.keybinding_summary.edits["$mod+Return"].setText("exec kitty")
+    window.keybinding_summary.edits["$mod+Return"].textEdited.emit("exec kitty")
+    assert "bindsym $mod+Return exec kitty" in window.documents[config].draft
     window.workspace_controls[2].editor.setText("2:editor")
     window.workspace_controls[2].editor.textEdited.emit("2:editor")
 

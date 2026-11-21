@@ -1,7 +1,7 @@
 import pytest
 
 from i3_rice_gui.keybindings import (
-    binding_conflicts, find_keybinding, find_keybindings,
+    binding_conflicts, find_keybinding, find_keybindings, replace_keybinding_command,
 )
 
 
@@ -28,3 +28,11 @@ def test_duplicate_triggers_are_reported_as_conflicts():
 def test_missing_trigger_is_reported():
     with pytest.raises(ValueError, match="not found"):
         find_keybinding("bindsym $mod+q kill\n", "$mod+w")
+
+
+def test_command_replacement_preserves_trigger_and_rejects_multiline_values():
+    assert replace_keybinding_command("  bindsym Print exec maim", "exec scrot") == (
+        "  bindsym Print exec scrot"
+    )
+    with pytest.raises(ValueError, match="one line"):
+        replace_keybinding_command("bindsym Print exec maim", "exec\nx")

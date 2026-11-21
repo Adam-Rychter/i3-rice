@@ -38,7 +38,9 @@ from .settings import ColorSetting, NumericSetting
 from .validation import ValidationResult, ValidationStatus, validate_i3
 from .persistence import ApplyError, ApplyResult, apply_document, restore_backup
 from .workspace_labels import find_workspace, find_workspace_labels, replace_workspace_label
-from .keybindings import binding_conflicts, find_keybindings
+from .keybindings import (
+    Keybinding, binding_conflicts, find_keybinding, find_keybindings, replace_keybinding_command,
+)
 from .i3_variables import (
     I3Variable, find_variable, find_variables, has_includes, replace_variable_value,
     variable_references,
@@ -251,6 +253,8 @@ class WorkspaceControl(QWidget):
 
 
 class KeybindingSummary(QWidget):
+    command_edited = Signal(str, str)
+
     def __init__(self) -> None:
         super().__init__()
         layout = QVBoxLayout(self)
@@ -263,6 +267,10 @@ class KeybindingSummary(QWidget):
         self.text.setMaximumHeight(180)
         self.text.setPlaceholderText("No literal bindsym entries found.")
         layout.addWidget(self.text)
+        self.rows = QVBoxLayout()
+        self.rows.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(self.rows)
+        self.edits: dict[str, QLineEdit] = {}
         self.help = QLabel("Keybinding commands are shown read-only until conflict-safe editing is implemented.")
         self.help.setObjectName("muted")
         self.help.setWordWrap(True)
@@ -270,16 +278,43 @@ class KeybindingSummary(QWidget):
 
     def clear(self, message: str) -> None:
         self.text.clear()
+        self._clear_rows()
         self.help.setText(message)
 
-    def show_bindings(self, text: str, conflicts: tuple[str, ...]) -> None:
-        self.text.setPlainText(text or "No literal bindsym entries found.")
+    def show_bindings(self, bindings: tuple[Keybinding, ...], conflicts: tuple[str, ...]) -> None:
+        self.text.setPlainText(
+            "\n".join(f"{binding.trigger}  →  {binding.command}" for binding in bindings)
+        )
+        self._clear_rows()
+        for binding in bindings:
+            row = QHBoxLayout()
+            label = QLabel(binding.trigger)
+            label.setMinimumWidth(150)
+            editor = QLineEdit(binding.command)
+            editor.textEdited.connect(
+                lambda value, trigger=binding.trigger: self.command_edited.emit(trigger, value)
+            )
+            row.addWidget(label)
+            row.addWidget(editor, 1)
+            self.rows.addLayout(row)
+            self.edits[binding.trigger] = editor
         if conflicts:
             self.help.setText("Conflict: duplicate trigger(s): " + ", ".join(conflicts))
         else:
-            self.help.setText(
-                "Keybinding commands are shown read-only until conflict-safe editing is implemented."
-            )
+            self.help.setText("Edit commands only; triggers stay fixed to prevent accidental conflicts.")
+
+    def _clear_rows(self) -> None:
+        self.edits.clear()
+        while self.rows.count():
+            item = self.rows.takeAt(0)
+            child = item.layout()
+            if child is None:
+                continue
+            while child.count():
+                widget_item = child.takeAt(0)
+                if widget_item.widget() is not None:
+                    widget_item.widget().deleteLater()
+            child.deleteLater()
 
 
 class VariableSummary(QWidget):
@@ -686,6 +721,7 @@ class MainWindow(QMainWindow):
             self.workspace_controls[number] = control
             detail_layout.addWidget(control)
         self.keybinding_summary = KeybindingSummary()
+        self.keybinding_summary.command_edited.connect(self.edit_keybinding)
         detail_layout.addWidget(self.keybinding_summary)
         self.variable_summary = VariableSummary()
         self.variable_summary.value_edited.connect(self.edit_variable)
@@ -1176,8 +1212,27 @@ class MainWindow(QMainWindow):
             return
         document = self.documents[self.current_path]
         bindings = find_keybindings(document.draft)
-        lines = [f"{binding.trigger}  →  {binding.command}" for binding in bindings]
-        self.keybinding_summary.show_bindings("\n".join(lines), binding_conflicts(bindings))
+        self.keybinding_summary.show_bindings(bindings, binding_conflicts(bindings))
+
+    def edit_keybinding(self, trigger: str, command: str) -> None:
+        if self.current_path is None or self.selected_component() != "workspaces":
+            return
+        document = self.documents[self.current_path]
+        try:
+            binding = find_keybinding(document.draft, trigger)
+            replacement = replace_keybinding_command(binding.line, command)
+            document.replace(binding.start, binding.end, binding.line, replacement)
+        except ValueError as exc:
+            self.keybinding_summary.help.setText(str(exc))
+            self.update_file_status()
+            return
+        self.invalidate_validation()
+        self.show_draft()
+        self.update_appearance()
+        self.update_workspace_controls()
+        self.update_keybinding_summary()
+        self.update_variable_summary()
+        self.update_file_status()
 
     def update_variable_summary(self) -> None:
         if self.current_path is None or self.selected_component() not in {"i3", "workspaces"}:
