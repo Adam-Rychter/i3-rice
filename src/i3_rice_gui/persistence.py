@@ -8,7 +8,7 @@ from pathlib import Path
 import stat
 import tempfile
 
-from .backups import BackupError, BackupResult, BackupStore
+from .backups import BackupError, BackupResult, BackupStore, BackupVersion
 from .document import ConfigDocument
 
 
@@ -98,3 +98,41 @@ def apply_document(
     _atomic_write(document.path, content, _mode(document.path))
     document.mark_applied()
     return ApplyResult(document.path, backup)
+
+
+def restore_backup(
+    document: ConfigDocument, version: BackupVersion, backup_store: BackupStore | None = None,
+) -> ApplyResult:
+    """Restore a verified backup, preserving the current file as a new backup."""
+    if version.record.source != document.path.absolute():
+        raise ApplyError("The selected backup belongs to a different configuration file.")
+    try:
+        if document.changed_externally():
+            raise ApplyConflict("The configuration changed externally; reload before restoring.")
+    except ApplyConflict:
+        raise
+    except OSError as exc:
+        raise ApplyError(f"Unable to check the configuration before restoring: {exc}") from exc
+    store = backup_store or BackupStore()
+    try:
+        content = store.read(version.record)
+    except BackupError as exc:
+        raise ApplyError(f"Unable to verify selected backup: {exc}") from exc
+    try:
+        text = content.decode("utf-8")
+    except UnicodeError as exc:
+        raise ApplyError("The selected backup is not valid UTF-8.") from exc
+    if text != version.text:
+        raise ApplyError("The selected backup changed; review backups again.")
+    candidate = ConfigDocument(
+        path=document.path,
+        baseline=document.baseline,
+        draft=text,
+        baseline_digest=document.baseline_digest,
+        baseline_exists=document.baseline_exists,
+        editor_newline=document.editor_newline,
+    )
+    result = apply_document(candidate, store)
+    document.load_draft(text)
+    document.mark_applied()
+    return result
