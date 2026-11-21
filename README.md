@@ -23,6 +23,8 @@ Workspace keybinding commands can also be edited while their triggers remain fix
 to prevent accidental duplicate bindings.
 The Displays panel reports connected X11 outputs and their current geometry
 read-only; arrangement changes remain disabled until a recovery path is tested.
+The Wallpaper panel detects literal `feh --bg-*` startup references and reports
+whether each referenced image exists; shell-based commands remain manual-only.
 Files that cannot be represented safely remain read-only. Draft edits can be
 reviewed and applied after
 confirmation; existing files are backed up and written atomically, while

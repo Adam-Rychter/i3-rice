@@ -42,6 +42,7 @@ from .keybindings import (
     Keybinding, binding_conflicts, find_keybinding, find_keybindings, replace_keybinding_command,
 )
 from .displays import inspect_displays
+from .wallpaper import find_wallpapers, resolve_wallpaper
 from .i3_variables import (
     I3Variable, find_variable, find_variables, has_includes, replace_variable_value,
     variable_references,
@@ -417,6 +418,36 @@ class DisplaySummary(QWidget):
         )
 
 
+class WallpaperSummary(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        title = QLabel("Wallpaper references")
+        title.setObjectName("section")
+        layout.addWidget(title)
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setMaximumHeight(120)
+        layout.addWidget(self.text)
+        self.help = QLabel(
+            "Wallpaper startup commands are shown read-only until safe path editing is implemented."
+        )
+        self.help.setObjectName("muted")
+        self.help.setWordWrap(True)
+        layout.addWidget(self.help)
+
+    def clear(self, message: str) -> None:
+        self.text.clear()
+        self.help.setText(message)
+
+    def show_references(self, lines: str) -> None:
+        self.text.setPlainText(lines or "No literal feh wallpaper reference found.")
+        self.help.setText(
+            "Wallpaper startup commands are shown read-only until safe path editing is implemented."
+        )
+
+
 class ScanSignals(QObject):
     complete = Signal(object)
     error = Signal(str)
@@ -759,6 +790,8 @@ class MainWindow(QMainWindow):
         detail_layout.addWidget(self.variable_summary)
         self.display_summary = DisplaySummary()
         detail_layout.addWidget(self.display_summary)
+        self.wallpaper_summary = WallpaperSummary()
+        detail_layout.addWidget(self.wallpaper_summary)
         detail_layout.addStretch()
         detail_scroll = QScrollArea()
         detail_scroll.setWidgetResizable(True)
@@ -997,6 +1030,9 @@ class MainWindow(QMainWindow):
         self.display_summary.setVisible(selected == "displays")
         self.display_summary.clear("Select Displays to inspect connected outputs.")
         self.update_display_summary()
+        self.wallpaper_summary.setVisible(selected == "wallpaper")
+        self.wallpaper_summary.clear("Select Wallpaper to inspect startup references.")
+        self.update_wallpaper_summary()
         if not data:
             return
         path, _ = data
@@ -1042,6 +1078,7 @@ class MainWindow(QMainWindow):
         self.update_workspace_controls()
         self.update_keybinding_summary()
         self.update_variable_summary()
+        self.update_wallpaper_summary()
         self.update_validation_controls()
 
     def watch_file(self, path: Path | None) -> None:
@@ -1147,6 +1184,7 @@ class MainWindow(QMainWindow):
         self.update_workspace_controls()
         self.update_keybinding_summary()
         self.update_variable_summary()
+        self.update_wallpaper_summary()
         self.update_file_status()
 
     def update_file_status(self, changed: bool | None = None) -> None:
@@ -1268,6 +1306,7 @@ class MainWindow(QMainWindow):
         self.update_workspace_controls()
         self.update_keybinding_summary()
         self.update_variable_summary()
+        self.update_wallpaper_summary()
         self.update_file_status()
 
     def update_variable_summary(self) -> None:
@@ -1299,6 +1338,18 @@ class MainWindow(QMainWindow):
             for display in displays
         ]
         self.display_summary.show_displays("\n".join(lines))
+
+    def update_wallpaper_summary(self) -> None:
+        if self.current_path is None or self.selected_component() != "wallpaper":
+            return
+        document = self.documents[self.current_path]
+        references = find_wallpapers(document.draft)
+        lines = []
+        for reference in references:
+            path = resolve_wallpaper(reference.path, self.current_path)
+            status = "found" if path.is_file() else "missing"
+            lines.append(f"{reference.mode}: {reference.path} ({status})")
+        self.wallpaper_summary.show_references("\n".join(lines))
 
     def edit_variable(self, name: str, value: str) -> None:
         if self.current_path is None or self.selected_component() not in {"i3", "workspaces"}:
