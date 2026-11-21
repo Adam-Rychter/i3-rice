@@ -1,7 +1,7 @@
 import pytest
 
 from i3_rice_gui.i3_variables import (
-    find_variable, find_variables, replace_variable_value, variable_references,
+    find_variable, find_variables, has_includes, replace_variable_value, variable_references,
 )
 
 
@@ -32,3 +32,8 @@ def test_duplicate_and_invalid_values_are_rejected():
         find_variables("set $mod Mod4\nset $mod Mod1\n")
     with pytest.raises(ValueError):
         replace_variable_value("set $mod Mod4", "value # unsafe")
+
+
+def test_include_detection_ignores_comments():
+    assert has_includes("# include other.conf\ninclude ~/.config/i3/keys.conf\n")
+    assert not has_includes("# include other.conf\nset $mod Mod4\n")

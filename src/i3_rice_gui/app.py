@@ -40,7 +40,8 @@ from .persistence import ApplyError, ApplyResult, apply_document, restore_backup
 from .workspace_labels import find_workspace, find_workspace_labels, replace_workspace_label
 from .keybindings import binding_conflicts, find_keybindings
 from .i3_variables import (
-    I3Variable, find_variable, find_variables, replace_variable_value, variable_references,
+    I3Variable, find_variable, find_variables, has_includes, replace_variable_value,
+    variable_references,
 )
 from .install_catalog import (
     AptPlan, PackageState, PackageStatus, build_apt_plan, detect_apt_packages,
@@ -308,6 +309,7 @@ class VariableSummary(QWidget):
 
     def show_variables(
         self, variables: tuple[I3Variable, ...], references: dict[str, int],
+        include_warning: bool = False,
     ) -> None:
         self._clear_rows()
         for variable in variables:
@@ -322,9 +324,17 @@ class VariableSummary(QWidget):
             row.addWidget(editor, 1)
             self.rows.addLayout(row)
             self.edits[variable.name] = editor
-        self.help.setText(
-            "Changing a variable updates every reference to it. Values stay conservative and cannot contain comments or newlines."
+        self.help.setText(self._help_text(include_warning))
+
+    @staticmethod
+    def _help_text(include_warning: bool) -> str:
+        message = (
+            "Changing a variable updates every reference in this file. Values stay "
+            "conservative and cannot contain comments or newlines."
         )
+        if include_warning:
+            message += " Includes are present; references in included files are not shown."
+        return message
 
     def _clear_rows(self) -> None:
         self.edits.clear()
@@ -1182,7 +1192,7 @@ class MainWindow(QMainWindow):
             variable.name: len(variable_references(document.draft, variable.name))
             for variable in variables
         }
-        self.variable_summary.show_variables(variables, references)
+        self.variable_summary.show_variables(variables, references, has_includes(document.draft))
 
     def edit_variable(self, name: str, value: str) -> None:
         if self.current_path is None or self.selected_component() not in {"i3", "workspaces"}:

@@ -20,6 +20,7 @@ _ASSIGNMENT = re.compile(
     r"(?P<quote>\"?)(?P<value>[^\"\r\n#]*?)(?P=quote)(?P<suffix>[ \t]*(?:#.*)?)$"
 )
 _REFERENCE = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")
+_INCLUDE = re.compile(r"^[ \t]*include(?:[ \t]|$)", re.MULTILINE)
 
 
 def _matches(text: str) -> list[re.Match[str]]:
@@ -63,6 +64,13 @@ def variable_references(text: str, name: str) -> tuple[int, ...]:
         match.start() for match in _REFERENCE.finditer(text)
         if match.group("name") == name
         and not setting.start <= match.start() < setting.end
+    )
+
+
+def has_includes(text: str) -> bool:
+    return any(
+        _INCLUDE.match(line) and not line.lstrip().startswith("#")
+        for line in text.splitlines()
     )
 
 
